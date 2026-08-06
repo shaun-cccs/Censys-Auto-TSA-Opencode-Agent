@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -352,7 +353,10 @@ def format_report(result: Dict[str, Any], max_context: int = 400) -> str:
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    # `tsa` exports CENSYS_TSA_PROG so usage strings name the command the user
+    # actually typed ("tsa assess"), not this file, which is not on their PATH.
     parser = argparse.ArgumentParser(
+        prog=os.environ.get("CENSYS_TSA_PROG"),
         description=(
             "Retrieve a CVE record from cve.org, falling back to NVD, and "
             "print it as context for building a Censys fingerprint."

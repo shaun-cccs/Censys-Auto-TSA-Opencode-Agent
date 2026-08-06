@@ -1,0 +1,35 @@
+#  Dependency declaration for the Censys TSA kit.
+#
+#  There is deliberately NO [build-system] table. Without one, uv treats this
+#  directory as a *virtual* project: `uv sync` installs the dependencies below
+#  into `.venv` but never installs this directory as a package. That is exactly
+#  what we want - `utils/*.py` stay ordinary scripts, so their flat sibling
+#  imports (`from censys_query import ...`) keep working, and `bin/tsa` can run
+#  them with:
+#
+#      uv run --project <kit> python <kit>/utils/censys_tsa.py ...
+#
+#  Adding a build backend here would turn this into an installable package and
+#  require rewriting those imports as relative ones. Do not add one casually.
+#
+#  `uv.lock` is committed so every install resolves to identical versions.
+
+[project]
+name = "censys-tsa-kit"
+version = "0.1.0"
+description = "Censys Threat Surface Assessment agents, references and tooling for opencode"
+readme = "README.md"
+requires-python = ">=3.10"
+
+#  Only the Censys Platform SDK. Everything else in utils/ is standard library
+#  on purpose: cve_lookup.py and tsa_report.py must run on a machine that has
+#  nothing installed, because bin/tsa dispatches them to bare python3.
+dependencies = [
+    "censys-platform>=0.15",
+]
+
+[dependency-groups]
+#  Test-only. tests/helpers.py parses agent frontmatter, which is YAML.
+dev = [
+    "pyyaml>=6.0",
+]

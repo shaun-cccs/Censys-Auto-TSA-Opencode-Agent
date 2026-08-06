@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""The references/ carve must stay a faithful copy of SKILL.md.
+"""Optional: check references/ against the upstream skill it was carved from.
 
-references/ is carved verbatim from the canonical censys-auto-tsa skill. The
-whole design depends on that: agent prompts are thin routers over the carve, so
-if a line goes missing the workflow silently loses a rule with nothing to
-signal it.
+references/ began as a verbatim carve of the censys-auto-tsa SKILL.md. **This
+copy is now canonical for this kit** - the packaging refactor rewrote every
+invocation and every path, so the two documents have diverged by design and
+references/ is where behavioural changes belong.
+
+This suite therefore exists for one person: whoever still maintains the upstream
+skill and wants to know what a change there did or did not carry over. It is
+opt-in and skips unless TSA_SKILL_MD points at a copy:
+
+    TSA_SKILL_MD=~/skills/censys-auto-tsa/SKILL.md tests/run.sh
 
 Every non-blank source line must appear verbatim somewhere in AGENTS.md or
 references/, unless it is on one of two explicit lists:
@@ -12,9 +18,8 @@ references/, unless it is on one of two explicit lists:
   DROPPED         - deliberately not carried over, with a reason
   KNOWN_REWRITES  - intentionally edited, by source line number
 
-Adding a line to either list is a decision. Leaving a line unaccounted for is a
-bug. If this test fails after you edit references/, the fix is almost always to
-revert the reference edit and put the change in an agent prompt instead.
+Expect a large KNOWN_REWRITES list: every line that named a script, a path or an
+interpreter was rewritten to a `tsa` subcommand.
 
 Run::
 
@@ -54,7 +59,9 @@ class CarveIntegrity(unittest.TestCase):
     def setUpClass(cls):
         if not SKILL_MD.exists():
             raise unittest.SkipTest(
-                f"canonical skill not present at {SKILL_MD}; carve tests skipped"
+                f"upstream skill not present at {SKILL_MD}; carve tests skipped. "
+                "Set TSA_SKILL_MD to a copy to run them; references/ is canonical "
+                "for this kit either way."
             )
         cls.source = SKILL_MD.read_text().splitlines()
         cls.haystack = set()

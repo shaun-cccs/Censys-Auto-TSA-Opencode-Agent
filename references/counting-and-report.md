@@ -1,20 +1,20 @@
 <!--
-Provenance: carved verbatim from censys-auto-tsa/SKILL.md (1497 lines),
-the canonical skill in `/home/jovyan/14 - Learning/Censys Auto TSA`.
+Provenance: originally carved verbatim from the upstream censys-auto-tsa
+SKILL.md (1497 lines). This copy is canonical for this kit.
 Source lines: 942-1000
 
 Step -> reference file map (the skill's inline "see step N" pointers resolve here):
-  the seven principles    -> AGENTS.md (always loaded)
-  workspace, credentials  -> references/workspace.md
-  steps 0, 0b  (CVE)      -> references/cve-workflow.md
-  steps 1, 2, 3, 3b       -> references/fingerprinting.md
-  aggregation semantics   -> references/aggregation-semantics.md
-  step 4  (CenQL rules)   -> references/cenql-rules.md
-  steps 5, 6, 7           -> references/counting-and-report.md
-  step 8  (deep dive)     -> references/deep-dive.md
-  step 9  (persistence)   -> references/report-spec.md
-  credit costs            -> references/credits.md
-  worked examples         -> references/examples.md
+  the seven principles    -> tsa ref principles (already in every agent prompt)
+  workspace, credentials  -> tsa ref workspace
+  steps 0, 0b  (CVE)      -> tsa ref cve-workflow
+  steps 1, 2, 3, 3b       -> tsa ref fingerprinting
+  aggregation semantics   -> tsa ref aggregation-semantics
+  step 4  (CenQL rules)   -> tsa ref cenql-rules
+  steps 5, 6, 7           -> tsa ref counting-and-report
+  step 8  (deep dive)     -> tsa ref deep-dive
+  step 9  (persistence)   -> tsa ref report-spec
+  credit costs            -> tsa ref credits
+  worked examples         -> tsa ref examples
 -->
 
 
@@ -26,8 +26,7 @@ step that produces the headline counts.
 ### 5. Validate before counting
 
 ```bash
-cd "/home/jovyan/14 - Learning/censys-tsa-opencode"
-python utils/censys_query.py '<base query>' --max-results 5 --format table
+tsa search '<base query>' --max-results 5 --format table
 ```
 
 Inspect the hits: are they really the product? If false positives appear,
@@ -41,8 +40,7 @@ to confirm a title, endpoint, version, certificate, or protocol response.
 ### 6. Run the TSA
 
 ```bash
-cd "/home/jovyan/14 - Learning/censys-tsa-opencode"
-python utils/censys_tsa.py '<base query>' --product '<Product Name>'
+tsa assess '<base query>' --product '<Product Name>'
 ```
 
 The script appends `not labels: "HONEYPOT"` to both counts and
@@ -71,10 +69,10 @@ one per count), measured from the org credit balance before and after. Pass
 5. **Canada TSA** - host count excluding honeypots, with query and URL.
 6. **Censys credit consumption** - **always include this section.** Report the
    credits the run consumed and the balance before and after, straight from the
-   `Credits used` block that `utils/censys_tsa.py` prints. Where a deep dive
+   `Credits used` block that `tsa assess` prints. Where a deep dive
    (step 8) followed, give the total across every TSA run in the session, and
    count the aggregations too - each costs 1 credit, they are not free. Only
-   `cve_lookup.py` and the credit endpoints themselves cost nothing. Never omit
+   `tsa cve` and the credit endpoints themselves cost nothing. Never omit
    this section, and never estimate the figure - quote what the tool measured.
    If credit tracking errored, say so rather than leaving it out.
 7. **Caveats** - fingerprint confidence, whether version is remotely observable,

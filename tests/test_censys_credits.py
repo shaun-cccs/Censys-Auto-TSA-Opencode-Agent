@@ -1,19 +1,33 @@
 #!/usr/bin/env python3
 """Tests for credit usage tracking (censys_credits + censys_tsa integration).
 
-Run with::
+Run with the rest of the suite: ``tests/run.sh``.
 
-    python -m unittest test_censys_credits -v
+These are the only tests that import the utils, which means they are the only
+ones needing the Censys SDK - so ``tests/run.sh`` runs the suite under uv. They
+skip rather than fail when the SDK is absent, because a contributor editing a
+prompt should not be blocked by an unsynced environment.
 """
 
 from __future__ import annotations
 
+import os
+import sys
 import unittest
 from datetime import date, timedelta
+from pathlib import Path
 from unittest import mock
 
-import censys_credits as cc
-import censys_tsa
+#  utils/ is a directory of flat scripts, deliberately not a package (see
+#  pyproject.toml). Importing them from here means putting it on sys.path, the
+#  same way running one of them as a script would.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "utils"))
+
+try:
+    import censys_credits as cc
+    import censys_tsa
+except ImportError as exc:  # pragma: no cover - environment, not logic
+    raise unittest.SkipTest(f"censys-platform SDK not available: {exc}")
 
 
 class FakeResponse:
@@ -211,6 +225,16 @@ class TestFormatting(unittest.TestCase):
 class TestTSAIntegration(unittest.TestCase):
     def setUp(self):
         self.gateway = mock.Mock(calls_made=2)
+        #  The SDK is mocked, but the token is resolved before the mock is
+        #  reached - `_sdk` passes `get_personal_access_token()` as an argument.
+        #  Without this the tracker records a credentials error and reports no
+        #  credits, which is correct behaviour and a useless test.
+        env = mock.patch.dict(
+            os.environ,
+            {"CENSYS_PERSONAL_ACCESS_TOKEN": "test-token", "CENSYS_ORG_ID": "org-1"},
+        )
+        env.start()
+        self.addCleanup(env.stop)
 
     def _run(self, track_credits, am=None):
         counts = mock.Mock(

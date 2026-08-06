@@ -1,27 +1,27 @@
 <!--
-Provenance: carved verbatim from censys-auto-tsa/SKILL.md (1497 lines),
-the canonical skill in `/home/jovyan/14 - Learning/Censys Auto TSA`.
+Provenance: originally carved verbatim from the upstream censys-auto-tsa
+SKILL.md (1497 lines). This copy is canonical for this kit.
 Source lines: 691-834
 
 Step -> reference file map (the skill's inline "see step N" pointers resolve here):
-  the seven principles    -> AGENTS.md (always loaded)
-  workspace, credentials  -> references/workspace.md
-  steps 0, 0b  (CVE)      -> references/cve-workflow.md
-  steps 1, 2, 3, 3b       -> references/fingerprinting.md
-  aggregation semantics   -> references/aggregation-semantics.md
-  step 4  (CenQL rules)   -> references/cenql-rules.md
-  steps 5, 6, 7           -> references/counting-and-report.md
-  step 8  (deep dive)     -> references/deep-dive.md
-  step 9  (persistence)   -> references/report-spec.md
-  credit costs            -> references/credits.md
-  worked examples         -> references/examples.md
+  the seven principles    -> tsa ref principles (already in every agent prompt)
+  workspace, credentials  -> tsa ref workspace
+  steps 0, 0b  (CVE)      -> tsa ref cve-workflow
+  steps 1, 2, 3, 3b       -> tsa ref fingerprinting
+  aggregation semantics   -> tsa ref aggregation-semantics
+  step 4  (CenQL rules)   -> tsa ref cenql-rules
+  steps 5, 6, 7           -> tsa ref counting-and-report
+  step 8  (deep dive)     -> tsa ref deep-dive
+  step 9  (persistence)   -> tsa ref report-spec
+  credit costs            -> tsa ref credits
+  worked examples         -> tsa ref examples
 -->
 
 
 # Aggregation semantics - verified reference
 
 These four subsections are children of "step 3. No usable tag - get creative
-inside Censys" (`references/fingerprinting.md`), but they are shared reference
+inside Censys" (`tsa ref fingerprinting`), but they are shared reference
 consumed by steps 0b, 2, 3, 6 and 8. Read them before running any aggregation.
 
 Every number in this file was measured, not estimated. Where it corrects an
@@ -87,7 +87,7 @@ you can see at a glance whether a distribution you are about to report is
 occurrence-based:
 
 ```bash
-python utils/censys_aggregate.py host.services.software.vendor '<query>' --compare-levels
+tsa agg host.services.software.vendor '<query>' --compare-levels
 ```
 
 An inflation of exactly 1.00x means the default count *happens* to be a host
@@ -117,7 +117,7 @@ contradictory forms. Verified on the same population:
 
 So: **always write the full field path in the `field` parameter** - aliases are
 rejected outright there, loudly, with a 422. Inside the `query` string the alias
-is fine and `labels:` is what `utils/censys_tsa.py` emits.
+is fine and `labels:` is what `tsa assess` emits.
 
 An earlier version of this skill claimed the `labels:` alias "silently returns 0
 buckets in an aggregation" when used as a *filter*, and told you to rewrite it to
@@ -157,7 +157,7 @@ host.services.labels.value  (--count-hosts, of 16,105 hosts):
 
 `labels:` is an alias for the **service-level** field, so `labels: "HONEYPOT"`
 and `host.services.labels.value:"HONEYPOT"` are equivalent - the small count gap
-is index churn between calls. Both `:` and `=` work. `utils/censys_tsa.py`
+is index churn between calls. Both `:` and `=` work. `tsa assess`
 appends the alias form, which is correct.
 
 Censys labelled **39%** of that population as honeypots. If a honeypot clause
@@ -169,6 +169,6 @@ concluding that Censys does not label the population.
 service-count thresholds, foreign-title exclusions, ASN blocklists - into a TSA
 base query. They are heuristics rather than product signatures, they are not
 reproducible by whoever reads the report, and they demonstrably discard genuine
-hosts. Rely on the `HONEYPOT` label that `utils/censys_tsa.py` already applies.
+hosts. Rely on the `HONEYPOT` label that `tsa assess` already applies.
 If a population still looks contaminated afterwards, say so in the caveats and
 quantify it; do not encode a private filter in the query.

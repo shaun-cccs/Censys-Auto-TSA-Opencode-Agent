@@ -21,11 +21,42 @@
  * by that root. Verified: a `bash` call inside a `censys-report` child session
  * resolves to the orchestrator's root session at depth 2.
  *
+ * SCOPE: THIS PLUGIN IS INSTALLED GLOBALLY AND MUST STAY OUT OF THE WAY
+ * --------------------------------------------------------------------
+ * `tool.execute.before` fires for every tool call in every session on the
+ * machine, and this plugin's defaults are fail-closed. Enforcing unconditionally
+ * would therefore block `webfetch` and `websearch` in every unrelated project
+ * the user opens - which is precisely what an earlier version of this file did
+ * once it was installed into ~/.config/opencode.
+ *
+ * `tool.execute.before` is not told which agent it is running under (its input
+ * is `{ tool, sessionID, callID }` and nothing else). `chat.message` and
+ * `chat.params` are, so we learn the agent there and remember it per session.
+ * Measured ordering, opencode 1.18.14 - the agent is always known before the
+ * first tool call, in parent and child sessions alike:
+ *
+ *     chat.message  sessionID=ses_A agent=build
+ *     chat.params   sessionID=ses_A agent=title      <- internal, ignored
+ *     chat.params   sessionID=ses_A agent=build
+ *     tool.before   tool=task      sessionID=ses_A
+ *     chat.message  sessionID=ses_B agent=explore    <- child session
+ *     chat.params   sessionID=ses_B agent=explore
+ *     tool.before   tool=bash      sessionID=ses_B
+ *
+ * Note the `title` agent shares the parent's session ID: opencode's internal
+ * agents run in-session, so the agent of a session is a SET, not a single value,
+ * and internal names must be filtered out.
+ *
+ * A session is governed only if its own agent is one of TSA_AGENTS, or - when
+ * the agent is somehow unknown - if its root session is a TSA session or has
+ * registered capabilities. Everything else returns immediately, so an install
+ * of this kit is invisible to the rest of a user's work.
+ *
  * FAIL CLOSED
  * -----------
- * A session with no registered capabilities gets DEFAULTS, which have every
- * network capability off. Forgetting to run the interview cannot silently
- * grant web access.
+ * Within a governed session, capabilities that were never registered get
+ * DEFAULTS, which have every network capability off. Forgetting to run the
+ * interview cannot silently grant web access.
  *
  * THE BUDGET IS A CIRCUIT-BREAKER, NOT AN ACCOUNTANT
  * --------------------------------------------------
@@ -40,9 +71,9 @@
  * ----------------------------------------------------------
  * Every other capability here is hard-enforced, because each maps to a distinct
  * tool this plugin can intercept and throw on. `versionBreakdown` does not. A
- * per-version distribution is produced by `censys_aggregate.py` - the same tool
- * used for all legitimate fingerprinting work - so there is no signature to
- * block on without also blocking step 1, 2, 3 and 8.
+ * per-version distribution is produced by `tsa agg` - the same command used for
+ * all legitimate fingerprinting work - so there is no signature to block on
+ * without also blocking step 1, 2, 3 and 8.
  *
  * It is carried here so it is visible, queryable and stated in the run summary,
  * but it is a behavioural directive honoured by the agent prompts, not a gate.
@@ -52,9 +83,19 @@
  *
  * REPRODUCIBILITY NOTE
  * --------------------
- * This file imports `@opencode-ai/plugin`, which requires `.opencode/package.json`.
- * opencode auto-generates `.opencode/.gitignore` which ignores that file, so it
- * must be force-added:  git add -f .opencode/package.json
+ * This file imports `@opencode-ai/plugin`. opencode installs that package into
+ * its config directory, but module resolution starts from this file's REAL
+ * path, not from the symlink that `install.sh` puts in
+ * ~/.config/opencode/plugin/. If the kit lives outside the config directory,
+ * install.sh bridges the gap with a `node_modules` symlink at the kit root; see
+ * the comment block in install.sh. When resolution fails opencode loads this
+ * plugin as nothing, silently, and NOTHING IS ENFORCED - which is why
+ * `tsa doctor` checks the resolution chain explicitly.
+ *
+ * For contributors working inside this repo, the same import is satisfied by
+ * `.opencode/package.json`. opencode auto-generates `.opencode/.gitignore`
+ * which ignores that file, so it must be force-added:
+ *     git add -f .opencode/package.json
  */
 
 import { type Plugin, tool } from "@opencode-ai/plugin"
@@ -70,7 +111,7 @@ type Caps = {
   writeReports: boolean
   /** Also print the assembled spec as a fenced json block in the final message.
    *  Independent of writeReports: a run can write a file, print the spec, both,
-   *  or neither. bin/tsa forces this on when no file is written, because then
+   *  or neither. `tsa run` forces this on when no file is written, because then
    *  the block is the only way it can recover the spec. */
   printSpec: boolean
   /** True once tsa_capabilities action=set has run for this session. The
@@ -96,17 +137,42 @@ const DEFAULTS: Caps = {
   source: "default (fail-closed)",
 }
 
-/** Over-estimated Censys costs, for the circuit-breaker only. */
+/** The agents this plugin governs. Anything else on the machine is none of its
+ *  business. Kept in sync with .opencode/agent/*.md by tests. */
+const TSA_AGENTS = new Set([
+  "censys-tsa",
+  "censys-tsa-auto",
+  "censys-fingerprint",
+  "censys-deepdive",
+  "censys-report",
+])
+
+/** opencode's internal agents run inside another agent's session (measured: the
+ *  `title` agent reuses the parent session ID). They must never be mistaken for
+ *  the session's real agent. */
+const INTERNAL_AGENTS = new Set(["title", "summary", "compaction"])
+
+/** Over-estimated Censys costs, for the circuit-breaker only.
+ *
+ *  Matches the `tsa` subcommands the prompts actually use, and keeps the old
+ *  `python utils/*.py` spellings so a hand-typed legacy command is still
+ *  counted rather than silently free. Tests assert these patterns cover every
+ *  Censys invocation present in the agent prompts and references.
+ *
+ *  Each rule is ONE regex with alternation, never two `.test()` calls joined by
+ *  `||`: tests/helpers.py parses this function out of the source and replays it
+ *  in Python rather than duplicating the rules, and that parser reads one
+ *  pattern per rule. Keep the shape. */
 function censysCost(command: string): number {
   if (!command) return 0
-  if (/censys_aggregate\.py/.test(command)) {
+  if (/\btsa\s+agg(regate)?\b|censys_aggregate\.py/.test(command)) {
     if (/--suggest-fields/.test(command)) return 15 // one request per field
     if (/--compare-levels/.test(command)) return 2 // doubles the cost
     return 1
   }
-  if (/censys_tsa\.py/.test(command)) return 2 // two counts
-  if (/censys_query\.py/.test(command)) return 1
-  return 0 // cve_lookup, censys_credits, tsa_report are all free
+  if (/\btsa\s+assess\b|censys_tsa\.py/.test(command)) return 2 // two counts
+  if (/\btsa\s+search\b|censys_query\.py/.test(command)) return 1
+  return 0 // cve, credits, budget, report, ref and doc are all free
 }
 
 function summarise(c: Caps): string {
@@ -123,7 +189,7 @@ function summarise(c: Caps): string {
   ].join("\n")
 }
 
-/** Parse the TSA_CAPABILITIES env var used by the unattended bin/tsa path. */
+/** Parse the TSA_CAPABILITIES env var used by the unattended `tsa run` path. */
 function fromEnv(): Caps | null {
   const raw = process.env.TSA_CAPABILITIES
   if (!raw) return null
@@ -152,10 +218,58 @@ function fromEnv(): Caps | null {
   return caps
 }
 
+/** State shared across every instance of this plugin in the process.
+ *
+ *  This file can legitimately be loaded twice: once from
+ *  ~/.config/opencode/plugin/ (the global install) and once from a project's own
+ *  .opencode/plugin/ - which is exactly what happens to anyone who clones this
+ *  kit and then opens it in opencode. Two loads mean two module instances, and
+ *  with per-instance state the consequences are silent and confusing: the
+ *  `tsa_capabilities` tool registration that wins writes to one instance's map,
+ *  while the other instance's `tool.execute.before` hook still sees nothing
+ *  registered and blocks a call the user just authorised.
+ *
+ *  Hanging the maps off globalThis makes the instances agree. */
+type SharedState = {
+  byRoot: Map<string, Caps>
+  rootMemo: Map<string, string>
+  agentsBySession: Map<string, Set<string>>
+}
+
+const STATE_KEY = "__tsaCapabilitiesState"
+
+function sharedState(): SharedState {
+  const holder = globalThis as any
+  if (!holder[STATE_KEY]) {
+    holder[STATE_KEY] = {
+      byRoot: new Map<string, Caps>(),
+      rootMemo: new Map<string, string>(),
+      agentsBySession: new Map<string, Set<string>>(),
+    } satisfies SharedState
+  }
+  return holder[STATE_KEY] as SharedState
+}
+
 export const TsaCapabilities: Plugin = async ({ client }) => {
-  const byRoot = new Map<string, Caps>()
-  const rootMemo = new Map<string, string>()
+  const { byRoot, rootMemo, agentsBySession } = sharedState()
   const envCaps = fromEnv()
+
+  function recordAgent(sessionID?: string, agent?: string) {
+    if (!sessionID || !agent || INTERNAL_AGENTS.has(agent)) return
+    let seen = agentsBySession.get(sessionID)
+    if (!seen) {
+      seen = new Set()
+      agentsBySession.set(sessionID, seen)
+    }
+    seen.add(agent)
+  }
+
+  function isTsaSession(sessionID: string): boolean {
+    const seen = agentsBySession.get(sessionID)
+    if (!seen) return false
+    for (const agent of seen) if (TSA_AGENTS.has(agent)) return true
+    return false
+  }
 
   async function rootOf(sessionID: string): Promise<string> {
     const hit = rootMemo.get(sessionID)
@@ -185,6 +299,30 @@ export const TsaCapabilities: Plugin = async ({ client }) => {
     return { root, caps }
   }
 
+  /**
+   * Should this plugin police this session at all?
+   *
+   * Three ways to say yes, in order of cost:
+   *
+   *  1. the session's own agent is a TSA agent - decisive, no I/O. A TSA
+   *     subagent always runs in its own session under its own name.
+   *  2. its root session is a TSA session - the case where a TSA orchestrator
+   *     delegates to something whose name we do not recognise.
+   *  3. capabilities were explicitly registered for its root. Only a TSA
+   *     agent's step -1 does that, and doing it deliberately from anywhere else
+   *     is an opt-in.
+   *
+   * Otherwise: no. Every unrelated session on the machine ends here, which is
+   * the whole point - this plugin is installed globally and fail-closed, so an
+   * unscoped version would block `webfetch` in every project the user opens.
+   */
+  async function governed(sessionID: string): Promise<boolean> {
+    if (isTsaSession(sessionID)) return true
+    const root = await rootOf(sessionID)
+    if (isTsaSession(root)) return true
+    return byRoot.get(root)?.registered === true
+  }
+
   const blocked = (what: string, why: string, fix: string) =>
     new Error(
       `[tsa-capabilities] ${what} is DISABLED for this TSA run.\n` +
@@ -195,10 +333,24 @@ export const TsaCapabilities: Plugin = async ({ client }) => {
     )
 
   return {
+    /**
+     * Agent identification. `tool.execute.before` is not given the agent, so
+     * these two hooks are the only way to know whose tool call we are looking
+     * at. Both fire before the first tool call of a session; see the ordering
+     * transcript in this file's header.
+     */
+    "chat.message": async (input) => {
+      recordAgent(input.sessionID, input.agent)
+    },
+    "chat.params": async (input) => {
+      recordAgent(input.sessionID, input.agent)
+    },
+
     tool: {
       tsa_capabilities: tool({
         description:
-          "Record or read the capability set for this TSA run. `censys-tsa` calls this once " +
+          "Record or read the capability set for this Censys TSA run. Only relevant to the " +
+          "censys-tsa agents; ignore it in any other context. `censys-tsa` calls this once " +
           "with action='set' immediately after interviewing the user, before any Censys call. " +
           "Any agent may call it with action='get' to learn what it is permitted to do. " +
           "Capabilities are enforced by the plugin across all subagents; they are not advisory.",
@@ -226,6 +378,7 @@ export const TsaCapabilities: Plugin = async ({ client }) => {
             .describe("ceiling on estimated Censys credits for this run; omit or 0 for uncapped"),
         },
         async execute(args, context) {
+          recordAgent(context.sessionID, context.agent)
           const { root, caps } = await capsFor(context.sessionID)
           if (args.action === "get") {
             return `Capabilities for this TSA run:\n${summarise(caps)}`
@@ -247,12 +400,15 @@ export const TsaCapabilities: Plugin = async ({ client }) => {
     },
 
     /**
-     * Hard enforcement. Fires for every tool call in every session, including
-     * subagent child sessions. Throwing here blocks the call outright,
-     * regardless of what the agent's static permissions say.
+     * Hard enforcement. Fires for every tool call in every session on the
+     * machine, including subagent child sessions - so the first thing it does is
+     * establish that this session is part of a TSA run at all. Throwing here
+     * blocks the call outright, regardless of what the agent's static
+     * permissions say.
      */
     "tool.execute.before": async (input, output) => {
       if (input.tool === "tsa_capabilities") return
+      if (!(await governed(input.sessionID))) return
       const { caps } = await capsFor(input.sessionID)
 
       if (input.tool === "webfetch" && !caps.webfetch) {

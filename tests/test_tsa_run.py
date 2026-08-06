@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Unit tests for bin/tsa - the unattended TSA driver.
+"""Unit tests for utils/tsa_run.py - the unattended driver behind `tsa run`.
 
 Pure functions only: no opencode, no Censys, no network. Fast.
 
 Run::
 
-    python -m unittest tests.test_bin_tsa -v
+    python -m unittest tests.test_tsa_run -v
 """
 
 from __future__ import annotations
@@ -14,13 +14,13 @@ import argparse
 import subprocess
 import unittest
 
-from tests.helpers import ROOT, flat, load_bin_tsa
+from tests.helpers import BIN_TSA, ROOT, flat, load_tsa_run
 
-tsa = load_bin_tsa()
+tsa = load_tsa_run()
 
 
 def args(**overrides) -> argparse.Namespace:
-    """A Namespace matching bin/tsa's parsed args, with test overrides."""
+    """A Namespace matching `tsa run`'s parsed args, with test overrides."""
     base = dict(
         target=None, cve=None, product=None, country="Canada", slug=None, note=None,
         model=None, timeout=3600, keep_going=False, print_prompt=False,
@@ -125,7 +125,7 @@ class Capabilities(unittest.TestCase):
         self.assertEqual(caps["budget"], "0")
 
     def test_reports_default_on(self):
-        """reports/<slug>.spec.json is bin/tsa's output contract."""
+        """reports/<slug>.spec.json is `tsa run`'s output contract."""
         caps = self.parse(tsa.build_capabilities(args(target="x")))
         self.assertEqual(caps["reports"], "on")
 
@@ -151,7 +151,7 @@ class Capabilities(unittest.TestCase):
                 self.assertEqual(caps["printspec"], printspec)
 
     def test_no_reports_forces_the_spec_block(self):
-        """Without a file, the block is the only way bin/tsa can recover the spec."""
+        """Without a file, the block is the only way `tsa run` can recover the spec."""
         caps = self.parse(tsa.build_capabilities(args(target="x", no_reports=True)))
         self.assertEqual(caps["printspec"], "on")
 
@@ -175,7 +175,7 @@ class Capabilities(unittest.TestCase):
             with self.subTest(key=key):
                 self.assertIn(
                     f'case "{key}"', plugin_source,
-                    f"bin/tsa emits {key!r} but the plugin has no case for it",
+                    f"`tsa run` emits {key!r} but the plugin has no case for it",
                 )
 
 
@@ -266,7 +266,8 @@ class CommandLine(unittest.TestCase):
 
     def run_tsa(self, *argv) -> subprocess.CompletedProcess:
         return subprocess.run(
-            ["bin/tsa", *argv], cwd=ROOT, capture_output=True, text=True, timeout=60
+            [str(BIN_TSA), "run", *argv],
+            cwd=ROOT, capture_output=True, text=True, timeout=60,
         )
 
     def test_help_exits_clean(self):

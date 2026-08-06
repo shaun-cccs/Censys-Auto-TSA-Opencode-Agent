@@ -15,10 +15,17 @@ venv/
 results.json
 *.out.json
 
-# Secrets - tokens come from the environment or the Spellbook vault, never files
+# Secrets - tokens come from the environment, never files
 .env
 *.token
 
-# NOTE: reports/ is deliberately NOT ignored in this project.
-# reports/<slug>.spec.json is the machine-readable output contract that
-# bin/tsa emits, so specs and rendered reports are versioned here.
+# Created by install.sh only when the kit lives OUTSIDE ~/.config/opencode:
+# a symlink to the config dir's node_modules, so the plugin's
+# `@opencode-ai/plugin` import resolves from the kit's real path.
+# See install.sh for why this is necessary.
+/node_modules
+
+# Reports are written to ./reports/ in whatever directory a TSA is run from,
+# which for a contributor is this repo. They are somebody's output, not part of
+# the kit.
+/reports/

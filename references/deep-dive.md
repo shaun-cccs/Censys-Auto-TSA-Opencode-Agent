@@ -1,20 +1,20 @@
 <!--
-Provenance: carved verbatim from censys-auto-tsa/SKILL.md (1497 lines),
-the canonical skill in `/home/jovyan/14 - Learning/Censys Auto TSA`.
+Provenance: originally carved verbatim from the upstream censys-auto-tsa
+SKILL.md (1497 lines). This copy is canonical for this kit.
 Source lines: 1002-1220
 
 Step -> reference file map (the skill's inline "see step N" pointers resolve here):
-  the seven principles    -> AGENTS.md (always loaded)
-  workspace, credentials  -> references/workspace.md
-  steps 0, 0b  (CVE)      -> references/cve-workflow.md
-  steps 1, 2, 3, 3b       -> references/fingerprinting.md
-  aggregation semantics   -> references/aggregation-semantics.md
-  step 4  (CenQL rules)   -> references/cenql-rules.md
-  steps 5, 6, 7           -> references/counting-and-report.md
-  step 8  (deep dive)     -> references/deep-dive.md
-  step 9  (persistence)   -> references/report-spec.md
-  credit costs            -> references/credits.md
-  worked examples         -> references/examples.md
+  the seven principles    -> tsa ref principles (already in every agent prompt)
+  workspace, credentials  -> tsa ref workspace
+  steps 0, 0b  (CVE)      -> tsa ref cve-workflow
+  steps 1, 2, 3, 3b       -> tsa ref fingerprinting
+  aggregation semantics   -> tsa ref aggregation-semantics
+  step 4  (CenQL rules)   -> tsa ref cenql-rules
+  steps 5, 6, 7           -> tsa ref counting-and-report
+  step 8  (deep dive)     -> tsa ref deep-dive
+  step 9  (persistence)   -> tsa ref report-spec
+  credit costs            -> tsa ref credits
+  worked examples         -> tsa ref examples
 -->
 
 
@@ -60,19 +60,18 @@ are confirmed instances, so whatever they have in common is a candidate
 signature:
 
 ```bash
-cd "/home/jovyan/14 - Learning/censys-tsa-opencode"
-python utils/censys_aggregate.py --suggest-fields '<base query>' -k 20
+tsa agg --suggest-fields '<base query>' -k 20
 ```
 
 Or target fields individually - favicon hash, HTML title, certificate subject,
 JARM, banner, port, cookie names, URI paths:
 
 ```bash
-python utils/censys_aggregate.py host.services.endpoints.http.favicons.hash_shodan \
+tsa agg host.services.endpoints.http.favicons.hash_shodan \
   '<base query>' -k 20
-python utils/censys_aggregate.py host.services.endpoints.http.html_title \
+tsa agg host.services.endpoints.http.html_title \
   '<base query>' -k 20
-python utils/censys_aggregate.py host.services.jarm.fingerprint '<base query>' -k 10
+tsa agg host.services.jarm.fingerprint '<base query>' -k 10
 ```
 
 **8a-bis. Hunt for a unique identifier string - the highest-value signal.**
@@ -89,7 +88,7 @@ Look for internal names the vendor never marketed but left in the code:
 | **Self-identifying support/doc link** | **the single best signal - the appliance names its own product line.** `product=SMA%201000%20Series` from the SonicWall portal's help link. See below. |
 | Internal codename / build name | `fecru` - the FishEye+Crucible application name, in every install's paths and cookies |
 | **Acquired-company / legacy brand name** | **survives rebranding in SSO endpoints, asset paths and redirect targets.** `viptela` for Cisco Catalyst SD-WAN Manager - Cisco acquired Viptela years earlier, yet the domain still appears in live SAML endpoints. Recovered +112 hosts the product's own name missed. |
-| **Quoted HTML attribute** | ``body=~`id=\"login_left\"` `` - a vendor's own markup. Escape the quotes (see `docs/censys_regex_language.md`); unquoted, the same token matches 36,017 unrelated login pages |
+| **Quoted HTML attribute** | ``body=~`id=\"login_left\"` `` - a vendor's own markup. Escape the quotes (see `tsa doc regex`); unquoted, the same token matches 36,017 unrelated login pages |
 | Product-specific cookie name | `FESESSIONID`, `JSESSIONID` - match with ``host.services.endpoints.http.headers:(key="Set-Cookie" and value=~`FESESSIONID`)`` |
 | Static asset or bundle path | `/s/.../_/download/resources/`, a versioned JS bundle name |
 | Custom or vendor HTTP header | `X-AUSERNAME`, `X-Forwarded-Server` values, vendor `Server` strings - query with `host.services.endpoints.http.headers:(key="X-AUSERNAME")` |
@@ -137,9 +136,9 @@ version.** Step 8b tests candidates by incremental gain. When you are choosing
 or replacing a *base* signal, run the comparison the other way as well:
 
 ```bash
-python utils/censys_aggregate.py host.services.hardware.version \
+tsa agg host.services.hardware.version \
   '<broad signal> and not (<precise signal>)' --count-hosts -k 20
-python utils/censys_aggregate.py host.services.endpoints.http.html_title \
+tsa agg host.services.endpoints.http.html_title \
   '<broad signal> and not (<precise signal>)' --count-hosts -k 20
 ```
 
@@ -157,8 +156,8 @@ two candidate base queries by total count alone - two queries can agree on a
 total while disagreeing on hundreds of hosts. Run both directions:
 
 ```bash
-python utils/censys_query.py '<new> and not (<old>)' --max-results 1   # gained
-python utils/censys_query.py '<old> and not (<new>)' --max-results 1   # lost
+tsa search '<new> and not (<old>)' --max-results 1   # gained
+tsa search '<old> and not (<new>)' --max-results 1   # lost
 ```
 
 Report both figures. "2,630 vs 2,620" hides that the new query gained 54 and
@@ -169,8 +168,7 @@ hosts from the base query, look at what is in the response, and pick out tokens
 that are meaningless outside this product:
 
 ```bash
-cd "/home/jovyan/14 - Learning/censys-tsa-opencode"
-python utils/censys_query.py '<base query>' --max-results 3 --format json \
+tsa search '<base query>' --max-results 3 --format json \
   -o /tmp/known_good.json
 grep -o -E '[a-z]{4,12}' /tmp/known_good.json | sort | uniq -c | sort -rn | head -40
 ```
@@ -178,7 +176,7 @@ grep -o -E '[a-z]{4,12}' /tmp/known_good.json | sort | uniq -c | sort -rn | head
 Then test the candidate string as a body or banner match:
 
 ```bash
-python utils/censys_query.py \
+tsa search \
   'host.services.endpoints.http.body=~`[Ff]ecru` and not (<base query>)' \
   --max-results 5 --format table
 ```
@@ -195,11 +193,11 @@ those hosts are genuinely the product. Always subtract the base query so you are
 looking purely at the incremental hits:
 
 ```bash
-python utils/censys_query.py \
+tsa search \
   '<candidate signal> and not (<base query>)' \
   --max-results 5 --format table
 
-python utils/censys_aggregate.py host.services.endpoints.http.html_title \
+tsa agg host.services.endpoints.http.html_title \
   '<candidate signal> and not (<base query>)' -k 20
 ```
 
@@ -232,8 +230,8 @@ content evidence to the same service with nested syntax where relevant.
 **8d. Validate the widened query, then re-run the TSA.**
 
 ```bash
-python utils/censys_query.py '<widened query>' --max-results 5 --format table
-python utils/censys_tsa.py '<widened query>' --product '<Product Name>'
+tsa search '<widened query>' --max-results 5 --format table
+tsa assess '<widened query>' --product '<Product Name>'
 ```
 
 **8e. Report the delta.** Present the deeper result as an addition to the

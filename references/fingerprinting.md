@@ -1,20 +1,20 @@
 <!--
-Provenance: carved verbatim from censys-auto-tsa/SKILL.md (1497 lines),
-the canonical skill in `/home/jovyan/14 - Learning/Censys Auto TSA`.
+Provenance: originally carved verbatim from the upstream censys-auto-tsa
+SKILL.md (1497 lines). This copy is canonical for this kit.
 Source lines: 416-689, 836-859
 
 Step -> reference file map (the skill's inline "see step N" pointers resolve here):
-  the seven principles    -> AGENTS.md (always loaded)
-  workspace, credentials  -> references/workspace.md
-  steps 0, 0b  (CVE)      -> references/cve-workflow.md
-  steps 1, 2, 3, 3b       -> references/fingerprinting.md
-  aggregation semantics   -> references/aggregation-semantics.md
-  step 4  (CenQL rules)   -> references/cenql-rules.md
-  steps 5, 6, 7           -> references/counting-and-report.md
-  step 8  (deep dive)     -> references/deep-dive.md
-  step 9  (persistence)   -> references/report-spec.md
-  credit costs            -> references/credits.md
-  worked examples         -> references/examples.md
+  the seven principles    -> tsa ref principles (already in every agent prompt)
+  workspace, credentials  -> tsa ref workspace
+  steps 0, 0b  (CVE)      -> tsa ref cve-workflow
+  steps 1, 2, 3, 3b       -> tsa ref fingerprinting
+  aggregation semantics   -> tsa ref aggregation-semantics
+  step 4  (CenQL rules)   -> tsa ref cenql-rules
+  steps 5, 6, 7           -> tsa ref counting-and-report
+  step 8  (deep dive)     -> tsa ref deep-dive
+  step 9  (persistence)   -> tsa ref report-spec
+  credit costs            -> tsa ref credits
+  worked examples         -> tsa ref examples
 -->
 
 
@@ -23,9 +23,9 @@ Step -> reference file map (the skill's inline "see step N" pointers resolve her
 Owned by the `censys-fingerprint` subagent.
 
 Steps 1-3 below are the discovery core. The dense aggregation-semantics
-subsections that originally sat inside step 3 now live in
-`references/aggregation-semantics.md` - read that file before running any
-aggregation, and read `references/cenql-rules.md` before writing any query.
+subsections that originally sat inside step 3 are now a reference of their own:
+run `tsa ref aggregation-semantics` before any aggregation, and
+`tsa ref cenql-rules` before writing any query.
 
 ### 1. Probe Censys first with a simple full-text search
 
@@ -50,15 +50,13 @@ CPE `part` letter tells you which tree a value belongs to: `a` = application,
 `h` = hardware, `o` = operating system.
 
 ```bash
-cd "/home/jovyan/14 - Learning/censys-tsa-opencode"
-
 # 1-2 word full-text seed: does the name appear anywhere in host records?
-python utils/censys_query.py '"MOVEit"' --max-results 5 --format table
+tsa search '"MOVEit"' --max-results 5 --format table
 
 # Check ALL THREE trees before deciding tagging is absent
-python utils/censys_aggregate.py host.services.software.product '"MOVEit"' -k 30
-python utils/censys_aggregate.py host.services.hardware.product '"MOVEit"' -k 30
-python utils/censys_aggregate.py host.operating_system.product '"MOVEit"' -k 30
+tsa agg host.services.software.product '"MOVEit"' -k 30
+tsa agg host.services.hardware.product '"MOVEit"' -k 30
+tsa agg host.operating_system.product '"MOVEit"' -k 30
 ```
 
 Broad seeds will pull in other products - that is expected and fine. You are
@@ -96,17 +94,15 @@ vendor, then build the base query on the **vendor + product pair**, nested in
 whichever tree the bucket came from:
 
 ```bash
-cd "/home/jovyan/14 - Learning/censys-tsa-opencode"
-
 # Which vendor owns that product tag? One clean bucket = unambiguous.
-python utils/censys_aggregate.py host.services.software.vendor \
+tsa agg host.services.software.vendor \
   'host.services.software.product="n-central"' -k 10
 
-python utils/censys_aggregate.py host.services.port \
+tsa agg host.services.port \
   'host.services.software:(vendor="n-able" and product="n-central")' -k 20
 
 # hardware tree - same shape, same rules
-python utils/censys_aggregate.py host.services.hardware.vendor \
+tsa agg host.services.hardware.vendor \
   'host.services.hardware.product="secure_mobile_access"' -k 10
 ```
 
@@ -149,7 +145,7 @@ check available and it costs one search.** Every `software`, `hardware` and
 look:
 
 ```bash
-python utils/censys_query.py '<tag query>' --max-results 1 --format json -o /tmp/one.json
+tsa search '<tag query>' --max-results 1 --format json -o /tmp/one.json
 ```
 
 A tag derived from a single weak signal is a lookup, not a fingerprint:
@@ -181,10 +177,10 @@ the tag population, subtract a known-good evidence fingerprint, and aggregate
 titles and ports over the remainder:
 
 ```bash
-python utils/censys_aggregate.py host.services.endpoints.http.html_title \
+tsa agg host.services.endpoints.http.html_title \
   '<tag query> and not labels: "HONEYPOT" and not (<evidence fingerprint>)' \
   --count-hosts --no-filter-by-query -k 20
-python utils/censys_aggregate.py host.services.port \
+tsa agg host.services.port \
   '<tag query> and not labels: "HONEYPOT" and not (<evidence fingerprint>)' \
   --count-hosts --no-filter-by-query -k 12
 ```
@@ -205,7 +201,7 @@ looks more mixed than it is. Re-run the title aggregation **with**
 binds the title to the same service that carried the tag:
 
 ```bash
-python utils/censys_aggregate.py host.services.endpoints.http.html_title \
+tsa agg host.services.endpoints.http.html_title \
   '<tag query>' --count-hosts -k 20
 ```
 
@@ -218,7 +214,7 @@ usable tag and keeping it. Read one raw record too, to see the per-service
 structure for yourself:
 
 ```bash
-python utils/censys_query.py '<query>' --max-results 1 --format json -o /tmp/one.json
+tsa search '<query>' --max-results 1 --format json -o /tmp/one.json
 ```
 
 Even when coverage looks complete, a tag-only query is the most likely to be
@@ -230,7 +226,7 @@ Stay in Censys. Use aggregations to reverse-engineer a fingerprint from raw
 evidence: banners, HTML titles, favicon hashes, certificate subjects, JARM,
 headers, cookie names, URI paths, ports.
 
-`utils/censys_aggregate.py` wraps the Censys aggregation API (max **2000** buckets):
+`tsa agg` wraps the Censys aggregation API (max **2000** buckets):
 
 ```python
 res = sdk.global_data.aggregate(
@@ -248,17 +244,15 @@ Start from a broad seed - the full-text name, an associated string, a banner
 regex, or a CVE - then bucket fields to find what those hosts have in common:
 
 ```bash
-cd "/home/jovyan/14 - Learning/censys-tsa-opencode"
-
 # Sweep the standard fingerprint-discovery fields in one go
-python utils/censys_aggregate.py --suggest-fields '"MOVEit Transfer"' -k 20
+tsa agg --suggest-fields '"MOVEit Transfer"' -k 20
 
 # Or target a single field
-python utils/censys_aggregate.py host.services.endpoints.http.favicons.hash_shodan \
+tsa agg host.services.endpoints.http.favicons.hash_shodan \
   '"MOVEit Transfer"' -k 20
-python utils/censys_aggregate.py host.services.endpoints.http.html_title \
+tsa agg host.services.endpoints.http.html_title \
   'host.services.vulns.id="CVE-2023-34362"' -k 30
-python utils/censys_aggregate.py host.services.cert.parsed.subject.organization \
+tsa agg host.services.cert.parsed.subject.organization \
   '"MOVEit Transfer"' -k 20
 ```
 

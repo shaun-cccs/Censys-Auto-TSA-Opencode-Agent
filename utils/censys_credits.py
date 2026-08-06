@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from contextlib import contextmanager
@@ -34,6 +35,7 @@ from censys_platform import SDK, models
 
 from censys_query import (
     CENSYS_ORG_ID,
+    get_org_id,
     RETRYABLE_STATUS,
     get_personal_access_token,
 )
@@ -83,7 +85,7 @@ def _dump(model: Any) -> Dict[str, Any]:
 @contextmanager
 def _sdk(org_id: str, token: Optional[str] = None) -> Iterator[SDK]:
     with SDK(
-        organization_id=org_id,
+        organization_id=get_org_id(org_id),
         personal_access_token=token or get_personal_access_token(),
     ) as sdk:
         yield sdk
@@ -114,7 +116,7 @@ def get_credit_balance(
         return _dump(
             _call(
                 lambda: client.account_management.get_organization_credits(
-                    organization_id=org_id
+                    organization_id=get_org_id(org_id)
                 )
             )
         )
@@ -158,7 +160,7 @@ def get_credit_usage(
         )
 
     request: Dict[str, Any] = {
-        "organization_id": org_id,
+        "organization_id": get_org_id(org_id),
         "start_date": start,
         "end_date": end,
         "granularity": granularity,
@@ -353,7 +355,10 @@ def format_tracker_summary(summary: Dict[str, Any]) -> str:
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    # `tsa` exports CENSYS_TSA_PROG so usage strings name the command the user
+    # actually typed ("tsa assess"), not this file, which is not on their PATH.
     parser = argparse.ArgumentParser(
+        prog=os.environ.get("CENSYS_TSA_PROG"),
         description="Inspect Censys credit balance and usage.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )

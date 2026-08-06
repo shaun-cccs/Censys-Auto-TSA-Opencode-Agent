@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -56,8 +57,14 @@ DEFAULT_COUNTRY = "Canada"
 
 
 def platform_url(query: str, org_id: str = CENSYS_ORG_ID) -> str:
-    """Build a shareable Censys Platform search URL for a query."""
-    return f"{PLATFORM_SEARCH_URL}?q={quote(query, safe='')}&org={org_id}"
+    """Build a shareable Censys Platform search URL for a query.
+
+    The org is omitted rather than guessed when it is unknown: a URL carrying
+    somebody else's organization looks authoritative and silently sends the
+    reader to a tenant they cannot see.
+    """
+    url = f"{PLATFORM_SEARCH_URL}?q={quote(query, safe='')}"
+    return f"{url}&org={org_id}" if org_id else url
 
 
 def wrap(base_query: str) -> str:
@@ -195,7 +202,10 @@ def format_report(result: Dict[str, Any]) -> str:
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    # `tsa` exports CENSYS_TSA_PROG so usage strings name the command the user
+    # actually typed ("tsa assess"), not this file, which is not on their PATH.
     parser = argparse.ArgumentParser(
+        prog=os.environ.get("CENSYS_TSA_PROG"),
         description="Compute a global and country-scoped Censys TSA for a product.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )

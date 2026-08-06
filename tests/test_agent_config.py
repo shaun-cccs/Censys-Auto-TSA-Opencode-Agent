@@ -89,14 +89,29 @@ class Frontmatter(unittest.TestCase):
         self.assertEqual(perms.get("websearch"), "deny")
 
     def test_report_agent_bash_is_restricted_to_the_renderer(self):
+        """This agent renders a file. It gets the renderer and nothing else.
+
+        The patterns must also be interpreter-free: an allowlist naming
+        `python` (as this one used to) denies itself on any machine where the
+        binary is called something else, which is most of them.
+        """
         bash = (frontmatter("censys-report").get("permission", {}) or {}).get("bash")
         self.assertIsInstance(bash, dict, "censys-report bash must be a pattern map")
         self.assertEqual(bash.get("*"), "deny", "must deny by default")
         allowed = [k for k, v in bash.items() if v == "allow"]
         self.assertTrue(allowed, "must allow the renderer")
+        self.assertIn("tsa report*", allowed, "must be able to render a report")
         for pattern in allowed:
             with self.subTest(pattern=pattern):
-                self.assertIn("tsa_report.py", pattern)
+                self.assertTrue(
+                    pattern.startswith("tsa "),
+                    f"{pattern!r} must invoke the kit's own command",
+                )
+                for word in ("python", "pip", "utils/", "/"):
+                    self.assertNotIn(
+                        word, pattern,
+                        f"{pattern!r} must not name an interpreter or a path",
+                    )
 
     def test_unattended_agents_cannot_ask_questions(self):
         """No UI exists under `opencode run`; a question there would hang."""
@@ -205,7 +220,7 @@ class Prompts(unittest.TestCase):
         )
 
     def test_unattended_path_appends_json_without_replacing_the_summary(self):
-        """bin/tsa needs the JSON to parse, but a human still reads the summary."""
+        """`tsa run` needs the JSON to parse, but a human still reads the summary."""
         text = flat(body("censys-tsa-auto"))
         self.assertRegex(
             text, r"(?i)never let the JSON replace the summary",
@@ -451,7 +466,7 @@ class InterviewIsNotSelfBlocking(unittest.TestCase):
         self.assertRegex(self.source, r"caps\.registered = true")
 
     def test_the_env_var_counts_as_registration(self):
-        """bin/tsa already made the choices; the unattended path has no interview."""
+        """`tsa run` already made the choices; the unattended path has no interview."""
         self.assertRegex(self.source, r'TSA_CAPABILITIES env",\s*registered: true')
 
 

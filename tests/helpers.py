@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Shared helpers for the test suite.
 
-No third-party test runner: the repo already standardises on ``unittest``
-(see ``utils/test_censys_credits.py``), and adding a dependency to run tests
-would be a poor trade for a project whose whole point is auditability.
+No third-party test runner: the repo standardises on ``unittest``, and adding a
+dependency to run tests would be a poor trade for a project whose whole point is
+auditability.
 """
 
 from __future__ import annotations
@@ -19,13 +19,23 @@ from typing import Any, Dict, Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# The canonical skill that references/ was carved from. External to this repo
-# and therefore optional - carve tests skip cleanly when it is absent.
-SKILL_MD = Path.home() / ".claude" / "skills" / "censys-auto-tsa" / "SKILL.md"
+#  The upstream skill that references/ was originally carved from. Nobody but
+#  the original maintainer has it, so the carve tests are opt-in: point
+#  TSA_SKILL_MD at a copy to run them, and they skip cleanly otherwise.
+#  references/ is canonical for this kit either way.
+SKILL_MD = Path(
+    os.environ.get(
+        "TSA_SKILL_MD",
+        Path.home() / ".claude" / "skills" / "censys-auto-tsa" / "SKILL.md",
+    )
+)
 
 AGENT_DIR = ROOT / ".opencode" / "agent"
-PLUGIN_TS = ROOT / ".opencode" / "plugins" / "tsa-capabilities.ts"
+PLUGIN_TS = ROOT / ".opencode" / "plugin" / "tsa-capabilities.ts"
+SKILL_DIR = ROOT / ".opencode" / "skill" / "censys-tsa"
 REFERENCES = ROOT / "references"
+BIN_TSA = ROOT / "bin" / "tsa"
+INSTALL_SH = ROOT / "install.sh"
 
 AGENTS = [
     "censys-tsa",
@@ -39,13 +49,41 @@ ORCHESTRATORS = ["censys-tsa", "censys-tsa-auto"]
 SUBAGENTS = ["censys-fingerprint", "censys-deepdive", "censys-report"]
 
 
-def load_bin_tsa():
-    """Import ``bin/tsa`` as a module despite it having no .py extension."""
-    loader = importlib.machinery.SourceFileLoader("bin_tsa", str(ROOT / "bin" / "tsa"))
-    spec = importlib.util.spec_from_loader("bin_tsa", loader)
+def shipped_prompts():
+    """Every file that ends up in front of a model on a user's machine.
+
+    These are what must stay free of filesystem paths and interpreter names:
+    they are read inside somebody else's project, where a relative path resolves
+    against the wrong directory and `python` may not exist.
+    """
+    return sorted(
+        [*AGENT_DIR.glob("*.md"), *REFERENCES.glob("*.md"), SKILL_DIR / "SKILL.md"]
+    )
+
+
+def load_tsa_run():
+    """Import ``utils/tsa_run.py``, the unattended driver behind `tsa run`."""
+    loader = importlib.machinery.SourceFileLoader(
+        "tsa_run", str(ROOT / "utils" / "tsa_run.py")
+    )
+    spec = importlib.util.spec_from_loader("tsa_run", loader)
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
     return module
+
+
+def tsa(*args, cwd=None, env=None, timeout=120):
+    """Run the `tsa` shim itself, as a user would."""
+    environ = dict(os.environ)
+    environ.update(env or {})
+    return subprocess.run(
+        [str(BIN_TSA), *args],
+        cwd=str(cwd or ROOT),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env=environ,
+    )
 
 
 def frontmatter(agent: str) -> Dict[str, Any]:

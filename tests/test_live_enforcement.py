@@ -26,7 +26,7 @@ from __future__ import annotations
 import os
 import unittest
 
-from tests.helpers import opencode_available, run_agent
+from tests.helpers import BIN_TSA, opencode_available, run_agent
 
 LIVE = os.environ.get("TSA_LIVE_TESTS") == "1"
 
@@ -72,12 +72,49 @@ class CapabilityEnforcement(unittest.TestCase):
     # -- fail-closed defaults -------------------------------------------------
 
     def test_defaults_deny_web_with_no_capabilities_registered(self):
+        """Fail-closed, in a session the plugin governs.
+
+        Note the subagent hop: the gate is deliberately scoped to the censys-*
+        agents, so a bare `build` session would - correctly - not be policed at
+        all. See test_an_unrelated_agent_is_not_policed.
+        """
+        out = run_agent(probe_via_subagent("censys-fingerprint"), caps=None)
+        self.assert_blocked(out)
+
+    # -- the plugin is installed globally and must ignore everything else -----
+
+    def test_an_unrelated_agent_is_not_policed(self):
+        """THE most important test here.
+
+        This plugin lives in ~/.config/opencode and its `tool.execute.before`
+        hook fires for every tool call in every session on the machine, with
+        fail-closed defaults. If it ever stops scoping itself to the censys-*
+        agents, it silently breaks `webfetch` in every unrelated project the
+        user opens - a far worse failure than anything it is guarding against.
+        """
         out = run_agent(
-            f"Use the webfetch tool on {PROBE} once. Report verbatim what "
-            "happened. Do not retry.",
+            f"Use the webfetch tool on {PROBE} once, then reply with one word: "
+            "succeeded or blocked.",
+            agent="build",
             caps=None,
         )
-        self.assertIn("tsa-capabilities", out, "the plugin did not intercept the call")
+        self.assertNotIn(
+            "tsa-capabilities", out,
+            "the TSA plugin policed a plain `build` session - it must only "
+            "govern the censys-* agents",
+        )
+        self.assert_succeeded(out)
+
+    def test_an_unrelated_agent_keeps_its_own_bash(self):
+        """The budget gate must not count, or block, somebody else's commands."""
+        out = run_agent(
+            "Run exactly once: echo tsa assess pretend-query . "
+            "Then reply with one word: ran or blocked.",
+            agent="build",
+            caps="budget=1",
+        )
+        self.assertNotIn("tsa-capabilities", out)
+        self.assertIn("ran", out.lower(), f"--- output ---\n{out[-1500:]}")
 
     # -- propagation into subagent child sessions -----------------------------
 
@@ -142,8 +179,8 @@ class CapabilityEnforcement(unittest.TestCase):
         """Costs zero credits: a TSA is priced at 2, so a budget of 1 blocks it."""
         out = run_agent(
             "Call tsa_capabilities action=set with callBudget=1. Then run exactly "
-            "once: python utils/censys_tsa.py 'host.services.port=443' --product "
-            "Test . Reply with one word: blocked or ran.",
+            f"once: {BIN_TSA} assess 'host.services.port=443' --product Test . "
+            "Reply with one word: blocked or ran.",
         )
         self.assert_blocked(out)
         self.assertIn("budget", out.lower())
@@ -152,7 +189,7 @@ class CapabilityEnforcement(unittest.TestCase):
 
     def test_free_tools_are_not_blocked(self):
         out = run_agent(
-            "Run exactly once: python utils/tsa_report.py --template . "
+            f"Run exactly once: {BIN_TSA} report --template . "
             "Then reply with one word: ran or blocked.",
             caps=ALL_OFF,
         )

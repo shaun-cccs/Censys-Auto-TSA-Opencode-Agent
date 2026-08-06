@@ -8,18 +8,25 @@ tests/run.sh          # fast: no agent runs, no network, no Censys
 tests/run.sh --live   # also exercises plugin enforcement against real agents
 ```
 
-Standard library `unittest`, no third-party runner - the repo already uses it
-(`utils/test_censys_credits.py`), and adding a dependency to run the tests
-would be a poor trade for a project whose point is auditability.
+Standard library `unittest`, no third-party runner - adding a dependency to run
+the tests would be a poor trade for a project whose point is auditability.
+
+`run.sh` prefers `uv run` so the suite gets the kit's locked environment, which
+is what lets `test_censys_credits.py` import the utils instead of skipping. With
+no uv it falls back to `python3` and the static checks still run. It never calls
+bare `python`, which does not exist on many machines - the reason this kit is
+packaged the way it is.
 
 ## What each file covers
 
 | File | Live? | Covers |
 | --- | --- | --- |
-| `test_carve_integrity.py` | no | `references/` is still a faithful copy of `SKILL.md` |
-| `test_bin_tsa.py` | no | slugs, version-breakdown decisions, capability serialisation, prompt building, spec recovery, CLI |
+| `test_portability.py` | no | no paths or interpreters in shipped prose, principles in sync, plugin scope, the `tsa` dispatch table, `tsa ref`/`tsa doc` coverage, the skill, `install.sh` against a throwaway HOME |
+| `test_tsa_run.py` | no | slugs, version-breakdown decisions, capability serialisation, prompt building, spec recovery, CLI |
 | `test_agent_config.py` | no | agent frontmatter, resolved permissions, plugin source invariants, budget costs, the endpoint-probe gate |
-| `test_live_enforcement.py` | **yes** | capabilities actually reaching subagents in their own child sessions |
+| `test_censys_credits.py` | no | credit tracking maths (skips without the SDK) |
+| `test_carve_integrity.py` | no | **opt-in**: what a change to the upstream skill did or did not carry over. Set `TSA_SKILL_MD`; skips otherwise |
+| `test_live_enforcement.py` | **yes** | capabilities actually reaching subagents in their own child sessions, and the plugin leaving other agents alone |
 
 ## Why the live tests exist
 
@@ -41,8 +48,8 @@ construction:
 - Every web probe targets `example.com`, IANA's documentation domain, never an
   assessed host. Principle six forbids contacting anything discovered in
   Censys, and that applies to the test suite too.
-- The only command that would spend credits (`censys_tsa.py`, priced at 2) is
-  run under `callBudget=1`, so the plugin throws **before** execution. Verified:
+- The only command that would spend credits (`tsa assess`, priced at 2) is run
+  under `callBudget=1`, so the plugin throws **before** execution. Verified:
   the thrown error names the budget, and no Censys response ever comes back.
 
 A full live run takes roughly two minutes.
@@ -58,19 +65,37 @@ and `test_resolved_network_permissions_are_not_ask` both guard this - the
 second checks what opencode actually *resolved*, which catches a rule that lost
 to a higher-precedence one.
 
-**Editing `references/` should fail the build.** `references/` is a verbatim
-carve of `SKILL.md`; behavioural changes belong in agent prompts. If
-`test_carve_integrity` fails after you edit a reference, the fix is usually to
-revert that edit and move the change into a prompt. Lines may be exempted via
-`DROPPED` or `KNOWN_REWRITES`, but each entry is a decision with a reason - and
-`test_rewrite_list_has_no_dead_entries` deletes the bookkeeping when it goes
-stale.
+**`references/` is canonical for this kit.** It began as a verbatim carve of the
+upstream `SKILL.md`, and `test_carve_integrity` still compares the two - but only
+when `TSA_SKILL_MD` points at a copy, and with a large `KNOWN_REWRITES` list,
+because packaging rewrote every path and every invocation. Behavioural changes
+now belong in `references/` or in a prompt, whichever the change is actually
+about.
+
+**No shipped prose may contain a path or an interpreter.** `test_portability.py`
+enforces it line by line across the agents, the references and the skill. The
+agents run in *someone else's* project: a relative path resolves against the
+wrong directory, an absolute path freezes the install location, and `python` is
+frequently not a command at all. `tsa ref` and `tsa doc` exist so that even
+reading this kit's own documentation needs no path. HTML comments are exempt -
+they address whoever edits the file, not the model.
+
+**The capability plugin must leave other agents alone.** It is installed
+globally, its `tool.execute.before` hook fires for every tool call in every
+session on the machine, and its defaults are fail-closed - so an unscoped
+version blocks `webfetch` in every unrelated project the user opens. The hook is
+not told which agent it belongs to, so the plugin learns that from
+`chat.message`/`chat.params`. `test_portability.PluginScope` checks the gate is
+in place and that `TSA_AGENTS` matches the agents on disk; the live suite proves
+a non-TSA agent is unaffected. **That live test is the most important one here.**
 
 **Budget costs are tested as behaviour, not text.** The rules live in
 TypeScript and cannot be imported, so `censys_cost_simulator()` parses them out
 of the plugin and replays them in Python against real command strings. Asserting
 on the source text instead was tried and was wrong: it matched prose in comments
-as readily as real rules.
+as readily as real rules. The parser reads **one regex per rule** - if you join
+two `.test()` calls with `||` in `censysCost`, it silently misparses and every
+command costs whatever the last `return` said.
 
 **The endpoint-probe regex is read from the plugin, not duplicated.** Six
 phrasings must *not* match (they are legitimate questions) and three must. A
@@ -78,8 +103,8 @@ vaguer pattern would block real questions, which is a worse failure than
 missing one.
 
 **`versionBreakdown` is deliberately not enforced.** Unlike every other
-capability, a version aggregation comes from `censys_aggregate.py` - the same
-tool as all legitimate fingerprinting - so there is no signature to block on.
+capability, a version aggregation comes from `tsa agg` - the same command as all
+legitimate fingerprinting - so there is no signature to block on.
 `test_version_breakdown_is_not_gated` asserts the *absence* of a gate so nobody
 adds one that would also break steps 1, 2, 3 and 8.
 

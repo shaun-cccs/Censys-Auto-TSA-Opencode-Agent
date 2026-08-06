@@ -28,10 +28,8 @@ from typing import Any, Deque, Dict, List, Optional, Tuple
 
 from censys_platform import SDK, models
 
-# Organization ID for the Censys Platform tenant
-CENSYS_ORG_ID = os.environ.get(
-    "CENSYS_ORG_ID", "7c96b9ef-3e11-4577-ab6f-1067e5211d4f"
-)
+# Organization ID for the Censys Platform tenant. No default: see get_org_id().
+CENSYS_ORG_ID = os.environ.get("CENSYS_ORG_ID", "")
 
 # Censys caps page_size at 100.
 MAX_PAGE_SIZE = 100
@@ -70,6 +68,15 @@ API_REQUEST_COST = 1
 
 class CreditCeilingError(RuntimeError):
     """Raised when the session credit ceiling would be exceeded."""
+
+
+class MissingCredentialError(RuntimeError):
+    """Raised when a required Censys credential is not configured.
+
+    Carries a full, actionable message: these scripts are driven by agents that
+    cannot see the user's shell, so "unauthorized" from the API is not a useful
+    failure mode. Fail before the request, and say exactly what to export.
+    """
 
 
 def estimate_query_cost(query: str) -> int:
@@ -266,16 +273,57 @@ class RateLimitGateway:
 
 
 def get_personal_access_token() -> str:
-    """Resolve the Censys token from the environment, else from Spellbook."""
+    """Resolve the Censys Platform token.
+
+    The environment is the only supported source. An optional private-vault
+    fallback exists for the organisation this kit came from and is deliberately
+    soft: if the vault client is not installed - which is the case for everyone
+    else - the ImportError is swallowed and the user gets an actionable message
+    instead of a traceback about a package they have never heard of.
+    """
     token = os.environ.get("CENSYS_PERSONAL_ACCESS_TOKEN")
     if token:
         return token
 
-    from hogwarts.spellbook import SpellbookClient
+    group = os.environ.get("CENSYS_VAULT_GROUP")
+    secret_name = os.environ.get("CENSYS_VAULT_SECRET")
+    if group and secret_name:
+        try:
+            from hogwarts.spellbook import SpellbookClient
+        except ImportError:
+            pass
+        else:
+            vault_client = SpellbookClient()
+            secret = vault_client.secrets.groups.get_secret(group, secret_name)
+            return secret["personal_access_token"]
 
-    vault_client = SpellbookClient()
-    secret = vault_client.secrets.groups.get_secret("CCDC1", "Censys")
-    return secret["personal_access_token"]
+    raise MissingCredentialError(
+        "CENSYS_PERSONAL_ACCESS_TOKEN is not set.\n"
+        "Create a personal access token in the Censys Platform UI and export it:\n"
+        "    export CENSYS_PERSONAL_ACCESS_TOKEN=...\n"
+        "    export CENSYS_ORG_ID=...\n"
+        "Run `tsa doctor` to check both."
+    )
+
+
+def get_org_id(explicit: Optional[str] = None) -> str:
+    """Resolve the Censys organization ID.
+
+    There is no default. An earlier version of this module hardcoded the
+    organization of the team that wrote it, which meant anyone else silently
+    queried - and built platform URLs for - a tenant that was not theirs.
+    """
+    org = explicit or CENSYS_ORG_ID
+    if org:
+        return org
+    raise MissingCredentialError(
+        "CENSYS_ORG_ID is not set.\n"
+        "It is the organization your token belongs to. Find it in the Censys\n"
+        "Platform UI under organization settings, or in the `org=` parameter of\n"
+        "any platform.censys.io URL, then export it:\n"
+        "    export CENSYS_ORG_ID=...\n"
+        "Run `tsa doctor` to check it."
+    )
 
 
 def censys_search_page(
@@ -345,7 +393,7 @@ def run_query(
     pages = 0
     errors: List[str] = []
 
-    with SDK(organization_id=org_id, personal_access_token=token) as sdk:
+    with SDK(organization_id=get_org_id(org_id), personal_access_token=token) as sdk:
         while len(hits) < max_results:
             remaining = max_results - len(hits)
             response, error = censys_search_page(
@@ -426,7 +474,10 @@ def format_table(result: Dict[str, Any]) -> str:
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    # `tsa` exports CENSYS_TSA_PROG so usage strings name the command the user
+    # actually typed ("tsa assess"), not this file, which is not on their PATH.
     parser = argparse.ArgumentParser(
+        prog=os.environ.get("CENSYS_TSA_PROG"),
         description="Run a Censys Platform search query with rate limiting.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )

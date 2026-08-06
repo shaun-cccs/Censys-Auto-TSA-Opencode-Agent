@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -43,6 +44,7 @@ from censys_platform import SDK, models
 from censys_query import (
     API_REQUEST_COST,
     CENSYS_ORG_ID,
+    get_org_id,
     DEFAULT_BUDGET_REQUESTS,
     DEFAULT_BUDGET_WINDOW,
     DEFAULT_MAX_PER_MINUTE,
@@ -221,7 +223,7 @@ def run_aggregate(
 ) -> Dict[str, Any]:
     """Aggregate a single field for a query."""
     token = token or get_personal_access_token()
-    with SDK(organization_id=org_id, personal_access_token=token) as sdk:
+    with SDK(organization_id=get_org_id(org_id), personal_access_token=token) as sdk:
         response, error = censys_aggregate(
             sdk,
             field,
@@ -257,7 +259,7 @@ def run_multi_aggregate(
     token = get_personal_access_token()
     results: List[Dict[str, Any]] = []
 
-    with SDK(organization_id=org_id, personal_access_token=token) as sdk:
+    with SDK(organization_id=get_org_id(org_id), personal_access_token=token) as sdk:
         for fld in fields:
             response, error = censys_aggregate(
                 sdk,
@@ -404,7 +406,10 @@ def format_comparison(rows: List[Dict[str, Any]], top: int = 25) -> str:
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    # `tsa` exports CENSYS_TSA_PROG so usage strings name the command the user
+    # actually typed ("tsa assess"), not this file, which is not on their PATH.
     parser = argparse.ArgumentParser(
+        prog=os.environ.get("CENSYS_TSA_PROG"),
         description="Aggregate Censys results by field to discover product fingerprints.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )

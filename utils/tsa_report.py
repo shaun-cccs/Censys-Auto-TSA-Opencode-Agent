@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import date
 from pathlib import Path
@@ -32,8 +33,12 @@ from urllib.parse import quote
 
 PLATFORM_SEARCH_URL = "https://platform.censys.io/search"
 
-# Matches the default organization used by the other utils; overridable per spec.
-DEFAULT_ORG_ID = "7c96b9ef-3e11-4577-ab6f-1067e5211d4f"
+# The organization to build platform URLs for. Taken from the environment, like
+# every other util; overridable per spec via the `org_id` key. There is
+# deliberately no hardcoded fallback - a baked-in tenant ID silently produced
+# authoritative-looking URLs pointing at an organization the reader has no
+# access to. With no org known, the URLs simply omit the parameter.
+DEFAULT_ORG_ID = os.environ.get("CENSYS_ORG_ID", "")
 
 HONEYPOT_CLAUSE = 'not labels: "HONEYPOT"'
 
@@ -307,7 +312,10 @@ TEMPLATE: Dict[str, Any] = {
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    # `tsa` exports CENSYS_TSA_PROG so usage strings name the command the user
+    # actually typed ("tsa assess"), not this file, which is not on their PATH.
     parser = argparse.ArgumentParser(
+        prog=os.environ.get("CENSYS_TSA_PROG"),
         description="Render a TSA investigation spec as a markdown report."
     )
     parser.add_argument("spec", nargs="?", help="path to a JSON spec, or '-' for stdin")

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 
@@ -59,7 +60,9 @@ def cmd_reset() -> int:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    # `tsa` exports CENSYS_TSA_PROG so usage strings name the command the user
+    # actually typed ("tsa assess"), not this file, which is not on their PATH.
+    parser = argparse.ArgumentParser(prog=os.environ.get("CENSYS_TSA_PROG"), description=__doc__)
     parser.add_argument("command", choices=("status", "reset"), nargs="?",
                         default="status")
     args = parser.parse_args(argv)

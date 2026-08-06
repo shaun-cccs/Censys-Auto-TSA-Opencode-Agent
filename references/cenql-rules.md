@@ -1,28 +1,28 @@
 <!--
-Provenance: carved verbatim from censys-auto-tsa/SKILL.md (1497 lines),
-the canonical skill in `/home/jovyan/14 - Learning/Censys Auto TSA`.
+Provenance: originally carved verbatim from the upstream censys-auto-tsa
+SKILL.md (1497 lines). This copy is canonical for this kit.
 Source lines: 861-940
 
 Step -> reference file map (the skill's inline "see step N" pointers resolve here):
-  the seven principles    -> AGENTS.md (always loaded)
-  workspace, credentials  -> references/workspace.md
-  steps 0, 0b  (CVE)      -> references/cve-workflow.md
-  steps 1, 2, 3, 3b       -> references/fingerprinting.md
-  aggregation semantics   -> references/aggregation-semantics.md
-  step 4  (CenQL rules)   -> references/cenql-rules.md
-  steps 5, 6, 7           -> references/counting-and-report.md
-  step 8  (deep dive)     -> references/deep-dive.md
-  step 9  (persistence)   -> references/report-spec.md
-  credit costs            -> references/credits.md
-  worked examples         -> references/examples.md
+  the seven principles    -> tsa ref principles (already in every agent prompt)
+  workspace, credentials  -> tsa ref workspace
+  steps 0, 0b  (CVE)      -> tsa ref cve-workflow
+  steps 1, 2, 3, 3b       -> tsa ref fingerprinting
+  aggregation semantics   -> tsa ref aggregation-semantics
+  step 4  (CenQL rules)   -> tsa ref cenql-rules
+  steps 5, 6, 7           -> tsa ref counting-and-report
+  step 8  (deep dive)     -> tsa ref deep-dive
+  step 9  (persistence)   -> tsa ref report-spec
+  credit costs            -> tsa ref credits
+  worked examples         -> tsa ref examples
 -->
 
 
 # Step 4 - CenQL rules for drafting the base host query
 
 Shared reference. Read before writing ANY query, in any step.
-Also read `docs/censys_query_language.md` and, for any `=~` pattern,
-`docs/censys_regex_language.md`.
+Also run `tsa doc cenql` and, for any `=~` pattern,
+`tsa doc regex`.
 
 ### 4. Draft the base host query
 
@@ -30,8 +30,8 @@ Rules:
 
 - **Count from `host.*` fields only.** `web.*`, `cert.*`, and tag fields are for
   pivoting and enrichment, never for the TSA counts.
-- Follow `docs/censys_query_language.md`. For anything using `=~`, read
-  `docs/censys_regex_language.md` first - escaping, anchor placement and the
+- Follow `tsa doc cenql`. For anything using `=~`, read
+  `tsa doc regex` first - escaping, anchor placement and the
   supported operator set are all sources of silent 0-hit results. Key points:
   - `:` is tokenized and case-insensitive; `=` is exact and case-sensitive.
   - Bind criteria to the *same* object with nested syntax:
@@ -89,8 +89,8 @@ Rules:
     cookie names like `FESESSIONID` are usable fingerprints.
 - Combine several weak signals with `or` when no single tag exists, e.g.
   favicon hash `or` HTML title `or` banner regex. Wrap the whole thing in
-  parentheses - `utils/censys_tsa.py` does this too, but be explicit.
-- Verify every field name by grepping the host field file. Invalid fields fail
+  parentheses - `tsa assess` does this too, but be explicit.
+- Verify every field name with `tsa doc host --grep <field>`. Invalid fields fail
   or silently return nothing.
 - Port alone is never sufficient; always pair it with content evidence.
 - **Software and hardware tags are always vendor-qualified and nested:**
