@@ -70,14 +70,18 @@ Ask all five in a single `question` call:
    - "No cap (Recommended)" / "20" / "50" / "100"
    - This is a coarse circuit-breaker against a runaway loop, not an accountant.
      I still measure real spend separately.
-5. **Write report files** - "Write `reports/<slug>.spec.json` and `.md` at the
-   end?"
-   - "Yes (Recommended)" - durable artifact with the full rationale, every query
-     variant, credits, caveats and sources
+5. **Report output** - "Write `reports/<slug>.spec.json` and `.md` at the end?"
+   - "Yes, write the files (Recommended)" - durable artifact with the full
+     rationale, every query variant, credits, caveats and sources
+     -> `writeReports: true, printSpec: false`
    - "No, just the summary in chat" - nothing written to disk
-   - **Either way you print the same compact summary** (step 7). This choice
-     only controls whether a file is also written. Never offer to dump raw spec
-     JSON into the chat as the alternative - nothing reads it there.
+     -> `writeReports: false, printSpec: false`
+   - "Both - write the files and show me the spec here" - for when you want the
+     artifact and also want to read or copy the spec without opening the file
+     -> `writeReports: true, printSpec: true`
+   - **All three print the same compact summary** (step 7). These flags only add
+     to it: `writeReports` writes a file, `printSpec` appends a fenced json
+     block below the summary. Neither ever replaces it.
 6. **Version breakdown** - "Break the exposed population down by version?"
    - "No, baseline only (Recommended)" / "Yes, show a per-version distribution"
    - A distribution costs an aggregation per field and makes the report much
@@ -192,14 +196,18 @@ recorded at step -1:
 When it runs, invoke `@censys-deepdive` with the validated base query and the
 step 6 counts. It returns the `deep_dive` spec fragment. Report the delta.
 
-**Step 9 - persist.** If `writeReports` is enabled, assemble the merged spec and
-invoke `@censys-report`.
+**Step 9 - persist.** Two independent switches, both set at step -1:
 
-If it is disabled, simply omit the `Full report:` line from your step 7 summary
-and say nothing was written to disk. **Do not dump the spec JSON into the chat.**
-The summary is the deliverable; raw JSON has no reader here and buries the
-numbers the user asked for. If they want the spec, they can re-run with report
-writing enabled.
+- `writeReports` - if enabled, assemble the merged spec and invoke
+  `@censys-report`. If disabled, omit the `Full report:` line from your summary
+  and say nothing was written to disk.
+- `printSpec` - if enabled, append the assembled spec as a single ```json
+  fenced block *below* the step 7 summary.
+
+**The summary is printed in all four combinations.** Neither switch ever
+replaces it - `printSpec` adds a block underneath, `writeReports` adds a file.
+Do not volunteer a raw JSON dump when `printSpec` is off; the summary is the
+deliverable and unrequested JSON just buries the numbers.
 
 ## Spec assembly - your core job
 

@@ -34,6 +34,7 @@ from tests.helpers import (
     SUBAGENTS,
     body,
     frontmatter,
+    flat,
     opencode_available,
     resolved_permissions,
     ts_regex,
@@ -159,7 +160,7 @@ class Prompts(unittest.TestCase):
         text = body("censys-tsa")
         self.assertIn("Step -1", text)
         for topic in ["Web research", "Version breakdown", "Credit budget",
-                      "Write report files", "Deep dive"]:
+                      "Report output", "Deep dive"]:
             with self.subTest(topic=topic):
                 self.assertIn(topic, text)
 
@@ -171,6 +172,21 @@ class Prompts(unittest.TestCase):
                 self.assertIn("Widened query", text)
                 self.assertIn("Caveats", text)
 
+    def test_interview_offers_all_three_report_options(self):
+        """Files only, summary only, or both."""
+        text = flat(body("censys-tsa"))
+        self.assertRegex(text, r"(?i)yes, write the files")
+        self.assertRegex(text, r"(?i)no, just the summary")
+        self.assertRegex(text, r"(?i)both - write the files and show me the spec")
+
+    def test_write_and_print_are_independent_switches(self):
+        text = flat(body("censys-tsa"))
+        self.assertIn("printSpec", text)
+        self.assertRegex(
+            text, r"(?i)summary is printed in all four combinations",
+            "the summary must survive every combination of the two switches",
+        )
+
     def test_summary_is_printed_even_when_no_file_is_written(self):
         """writeReports controls the FILE, not the terminal format.
 
@@ -178,10 +194,10 @@ class Prompts(unittest.TestCase):
         JSON into the chat when report writing was off. Nothing reads JSON in a
         chat, and it buried the counts the user actually asked for.
         """
-        text = body("censys-tsa")
+        text = flat(body("censys-tsa"))
         self.assertRegex(
-            text, r"(?i)do not dump the spec json",
-            "censys-tsa must not offer a JSON dump as the no-file alternative",
+            text, r"(?i)do not volunteer a raw json dump",
+            "censys-tsa must not dump JSON unless printSpec was requested",
         )
         self.assertRegex(
             text, r"(?i)omit the `Full report:` line",
@@ -190,10 +206,13 @@ class Prompts(unittest.TestCase):
 
     def test_unattended_path_appends_json_without_replacing_the_summary(self):
         """bin/tsa needs the JSON to parse, but a human still reads the summary."""
-        text = body("censys-tsa-auto")
+        text = flat(body("censys-tsa-auto"))
         self.assertRegex(
-            text, r"(?i)in addition to it, never instead of it",
+            text, r"(?i)never let the JSON replace the summary",
             "the spec JSON must accompany the summary, not replace it",
+        )
+        self.assertRegex(
+            text, r"(?i)in addition to the summary, never instead of it"
         )
 
     def test_fingerprint_keeps_cve_version_scoping_mandatory(self):

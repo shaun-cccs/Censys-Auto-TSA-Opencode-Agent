@@ -68,6 +68,11 @@ type Caps = {
   deepDive: DeepDive
   versionBreakdown: boolean
   writeReports: boolean
+  /** Also print the assembled spec as a fenced json block in the final message.
+   *  Independent of writeReports: a run can write a file, print the spec, both,
+   *  or neither. bin/tsa forces this on when no file is written, because then
+   *  the block is the only way it can recover the spec. */
+  printSpec: boolean
   /** True once tsa_capabilities action=set has run for this session. The
    *  startup interview happens before that, and must not be gated by the
    *  very flags it is asking the user to choose. */
@@ -84,6 +89,7 @@ const DEFAULTS: Caps = {
   deepDive: "after",
   versionBreakdown: false,
   writeReports: true,
+  printSpec: false,
   registered: false,
   callBudget: null,
   callsUsed: 0,
@@ -111,6 +117,7 @@ function summarise(c: Caps): string {
     `deep dive      : ${c.deepDive}`,
     `version brkdwn : ${c.versionBreakdown ? "ENABLED" : "disabled"}  (advisory - not plugin-enforced)`,
     `write reports  : ${c.writeReports}`,
+    `print spec     : ${c.printSpec}`,
     `censys budget  : ${budget}`,
     `source         : ${c.source}`,
   ].join("\n")
@@ -131,6 +138,7 @@ function fromEnv(): Caps | null {
       case "endpoint": caps.endpointValidation = on; break
       case "versionbreakdown": caps.versionBreakdown = on; break
       case "reports": caps.writeReports = on; break
+      case "printspec": caps.printSpec = on; break
       case "deepdive":
         caps.deepDive = (["always", "never", "after"].includes(v) ? v : "never") as DeepDive
         break
@@ -209,6 +217,11 @@ export const TsaCapabilities: Plugin = async ({ client }) => {
             ),
           writeReports: tool.schema.boolean().optional()
             .describe("write reports/<slug>.spec.json and .md at the end"),
+          printSpec: tool.schema.boolean().optional()
+            .describe(
+              "also print the assembled spec as a fenced json block after the summary. " +
+              "Independent of writeReports - both can be true.",
+            ),
           callBudget: tool.schema.number().optional()
             .describe("ceiling on estimated Censys credits for this run; omit or 0 for uncapped"),
         },
@@ -223,6 +236,7 @@ export const TsaCapabilities: Plugin = async ({ client }) => {
           if (args.deepDive !== undefined) caps.deepDive = args.deepDive
           if (args.versionBreakdown !== undefined) caps.versionBreakdown = args.versionBreakdown
           if (args.writeReports !== undefined) caps.writeReports = args.writeReports
+          if (args.printSpec !== undefined) caps.printSpec = args.printSpec
           if (args.callBudget !== undefined) caps.callBudget = args.callBudget > 0 ? args.callBudget : null
           caps.source = `interview by ${context.agent}`
           caps.registered = true

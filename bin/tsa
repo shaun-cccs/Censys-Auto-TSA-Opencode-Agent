@@ -115,6 +115,10 @@ def build_capabilities(args: argparse.Namespace) -> str:
     this wrapper's output contract.
     """
     breakdown, _ = wants_version_breakdown(args)
+    # With no file written there is nothing for this wrapper to read, so the
+    # fenced json block becomes the only way to recover the spec. Independent of
+    # that, --print-spec asks for the block alongside the files.
+    print_spec = args.print_spec or args.no_reports
     return " ".join(
         [
             f"webfetch={'on' if args.allow_web else 'off'}",
@@ -123,6 +127,7 @@ def build_capabilities(args: argparse.Namespace) -> str:
             f"deepdive={'always' if args.deep_dive else 'never'}",
             f"versionbreakdown={'on' if breakdown else 'off'}",
             f"reports={'off' if args.no_reports else 'on'}",
+            f"printspec={'on' if print_spec else 'off'}",
             f"budget={args.budget if args.budget else 0}",
         ]
     )
@@ -162,16 +167,20 @@ def build_prompt(args: argparse.Namespace, slug: str, capabilities: str) -> str:
             "Still print the normal compact summary - product, baseline query and",
             "counts, widened query if any, basis and credits, caveats - and simply",
             "omit the `Full report:` line.",
-            "",
-            "Then, below the summary, append the fully assembled spec as a single",
-            "JSON object inside a ```json fenced block so this wrapper can recover",
-            "it. The block is in addition to the summary, never instead of it.",
         ]
     else:
         lines += [
             "You MUST finish by invoking @censys-report so that",
             f"reports/{slug}.spec.json and reports/{slug}.md exist on disk.",
             "A run that produces no spec file is a failed run.",
+        ]
+
+    if args.print_spec or args.no_reports:
+        lines += [
+            "",
+            "Below the summary, append the fully assembled spec as a single JSON",
+            "object inside a ```json fenced block. The block is in addition to the",
+            "summary, never instead of it.",
         ]
 
     if args.note:
@@ -245,7 +254,12 @@ def main() -> int:
     caps.add_argument(
         "--no-reports",
         action="store_true",
-        help="Do not write reports/<slug>.*; emit the spec from the agent's final message instead",
+        help="Do not write reports/<slug>.*; recover the spec from the agent's message instead",
+    )
+    caps.add_argument(
+        "--print-spec",
+        action="store_true",
+        help="Also print the spec as a json block below the summary (implied by --no-reports)",
     )
     args = p.parse_args()
 

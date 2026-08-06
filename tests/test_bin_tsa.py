@@ -14,7 +14,7 @@ import argparse
 import subprocess
 import unittest
 
-from tests.helpers import ROOT, load_bin_tsa
+from tests.helpers import ROOT, flat, load_bin_tsa
 
 tsa = load_bin_tsa()
 
@@ -25,7 +25,7 @@ def args(**overrides) -> argparse.Namespace:
         target=None, cve=None, product=None, country="Canada", slug=None, note=None,
         model=None, timeout=3600, keep_going=False, print_prompt=False,
         allow_web=False, allow_endpoint_check=False, deep_dive=False,
-        budget=None, version_breakdown=False, no_reports=False,
+        budget=None, version_breakdown=False, no_reports=False, print_spec=False,
     )
     base.update(overrides)
     return argparse.Namespace(**base)
@@ -134,6 +134,27 @@ class Capabilities(unittest.TestCase):
         self.assertEqual(caps["webfetch"], "on")
         self.assertEqual(caps["websearch"], "on")
 
+    def test_print_spec_is_independent_of_writing_files(self):
+        """All four combinations must be expressible."""
+        combos = {
+            (False, False): ("on", "off"),   # default: files, no block
+            (True, False): ("on", "on"),     # both: files and block
+            (False, True): ("off", "on"),    # no file, so the block is forced on
+            (True, True): ("off", "on"),
+        }
+        for (print_spec, no_reports), (reports, printspec) in combos.items():
+            with self.subTest(print_spec=print_spec, no_reports=no_reports):
+                caps = self.parse(tsa.build_capabilities(
+                    args(target="x", print_spec=print_spec, no_reports=no_reports)
+                ))
+                self.assertEqual(caps["reports"], reports)
+                self.assertEqual(caps["printspec"], printspec)
+
+    def test_no_reports_forces_the_spec_block(self):
+        """Without a file, the block is the only way bin/tsa can recover the spec."""
+        caps = self.parse(tsa.build_capabilities(args(target="x", no_reports=True)))
+        self.assertEqual(caps["printspec"], "on")
+
     def test_each_flag_maps_to_its_capability(self):
         caps = self.parse(tsa.build_capabilities(args(
             target="x", allow_endpoint_check=True, deep_dive=True,
@@ -196,12 +217,20 @@ class Prompt(unittest.TestCase):
         a = args(target="x", no_reports=True)
         prompt = tsa.build_prompt(a, "x", tsa.build_capabilities(a))
         self.assertIn("compact summary", prompt)
-        self.assertIn("in addition to the summary, never instead of it", prompt)
+        self.assertIn("in addition to the summary, never instead of it", flat(prompt))
 
-    def test_reports_enabled_does_not_ask_for_a_json_dump(self):
+    def test_a_plain_run_does_not_ask_for_a_json_block(self):
         a = args(target="x")
         prompt = tsa.build_prompt(a, "x", tsa.build_capabilities(a))
         self.assertNotIn("```json", prompt)
+
+    def test_print_spec_asks_for_the_block_alongside_the_files(self):
+        """The 'both' option: durable artifact AND the spec inline."""
+        a = args(target="x", print_spec=True)
+        prompt = tsa.build_prompt(a, "x", tsa.build_capabilities(a))
+        self.assertIn("@censys-report", prompt, "files must still be written")
+        self.assertIn("```json", prompt, "the spec block must also be requested")
+        self.assertIn("in addition to the summary", flat(prompt))
 
 
 class ExtractSpec(unittest.TestCase):

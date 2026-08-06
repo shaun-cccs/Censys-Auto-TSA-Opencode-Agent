@@ -122,9 +122,10 @@ answer; a confident wrong number is not.
    `bin/tsa` reads: a run that should have produced `reports/<slug>.spec.json`
    and did not is a failed run.**
 
-   If `writeReports` is disabled, nothing is written, so `bin/tsa` has no file
-   to read. In that case only, append the assembled spec as a single ```json
-   fenced block *after* the summary in step 8, so the wrapper can recover it.
+   Separately, if `printSpec` is enabled, append the assembled spec as a single
+   ```json fenced block *after* the summary in step 8. `bin/tsa` forces this on
+   whenever no file is written, because the block is then the only way it can
+   recover the spec - but the two switches are independent, and both can be on.
    The block is machine payload; the summary above it is still what a human
    reads. Never let the JSON replace the summary.
 
@@ -154,9 +155,9 @@ answer; a confident wrong number is not.
    Never print the honeypot or country query variants, or any platform URL.
    Credits are one line, always shown, always measured.
 
-   **Always print this summary, on every run.** When `writeReports` is disabled,
-   drop the `Full report:` line and append the spec JSON block described in step
-   7 below the summary - in addition to it, never instead of it.
+   **Always print this summary, on every run.** Drop the `Full report:` line
+   when `writeReports` is off, and append the spec JSON block from step 7 when
+   `printSpec` is on - in addition to the summary, never instead of it.
 
 ## Spec assembly
 

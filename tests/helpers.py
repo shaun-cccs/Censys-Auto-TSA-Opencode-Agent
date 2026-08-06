@@ -65,6 +65,16 @@ def body(agent: str) -> str:
     return re.sub(r"^---\n.*?\n---\n", "", text, flags=re.S)
 
 
+def flat(text: str) -> str:
+    """Collapse all whitespace to single spaces.
+
+    Prompt files are hard-wrapped, so a phrase that reads as one sentence is
+    often split across lines. Assertions on prose should not break because a
+    sentence was rewrapped.
+    """
+    return re.sub(r"\s+", " ", text)
+
+
 def opencode_available() -> bool:
     return shutil.which("opencode") is not None
 
