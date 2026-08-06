@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Local rate-limit / credit state
+.censys_query_rate_state.json
+
+# Query output artifacts
+results.json
+*.out.json
+
+# Secrets - tokens come from the environment or the Spellbook vault, never files
+.env
+*.token
+
+# NOTE: reports/ is deliberately NOT ignored in this project.
+# reports/<slug>.spec.json is the machine-readable output contract that
+# bin/tsa emits, so specs and rendered reports are versioned here.
