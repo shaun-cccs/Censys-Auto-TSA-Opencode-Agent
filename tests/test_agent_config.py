@@ -303,37 +303,112 @@ class EndpointProbeGate(unittest.TestCase):
     """The plugin blocks the step-0b probe request when it was not authorised.
 
     The pattern is read from the TypeScript source rather than duplicated, so
-    editing the plugin changes what these cases are checked against. It must be
-    high-precision: a vaguer pattern would block legitimate questions, which is
-    a worse failure than missing one.
+    editing the plugin changes what these cases are checked against.
+
+    These cases are full `question` tool payloads, not bare sentences. That
+    distinction is the entire point: the plugin sees `JSON.stringify` of the
+    whole payload - header, option labels and descriptions included. An earlier
+    version of this test checked only the question sentence, passed, and shipped
+    a gate that blocked the startup interview's own "User-operated endpoint
+    validation" question. Match tools, not talk.
     """
 
-    MUST_NOT_MATCH = [
-        "may I ask you to run that request yourself against a host you own?",
-        "Want me to dig deeper and hunt for additional signatures?",
-        "May I use web research if Censys alone can't identify the product?",
-        "Should I run the request for the Canada count as well?",
-        "Which country should the second count use?",
-        "Break the exposed population down by version?",
-    ]
-    MUST_MATCH = [
-        "Please run: curl --include --max-time 10 https://1.2.3.4/status and paste the status back.",
-        "This is user-operated endpoint validation. Fetch it yourself and paste the response.",
-        "Run the command with --include against your own host and paste the headers.",
-    ]
+    def payload(self, header: str, question: str, *options: str) -> str:
+        import json
+
+        return json.dumps({
+            "questions": [{
+                "header": header,
+                "question": question,
+                "options": [{"label": o, "description": o} for o in options],
+            }]
+        }).lower()
 
     def setUp(self):
         self.pattern = re.compile(ts_regex("endpoint_probe"))
 
-    def test_legitimate_questions_are_not_blocked(self):
-        for text in self.MUST_NOT_MATCH:
-            with self.subTest(text=text[:48]):
-                self.assertIsNone(self.pattern.search(text.lower()))
+    def assert_allowed(self, text: str, why: str):
+        self.assertIsNone(
+            self.pattern.search(text),
+            f"gate would wrongly block: {why}",
+        )
 
-    def test_probe_requests_are_blocked(self):
-        for text in self.MUST_MATCH:
-            with self.subTest(text=text[:48]):
-                self.assertIsNotNone(self.pattern.search(text.lower()))
+    def assert_blocked(self, text: str, why: str):
+        self.assertIsNotNone(self.pattern.search(text), f"gate failed to block: {why}")
+
+    def test_the_startup_interview_is_not_blocked(self):
+        """The regression that shipped: the gate blocked its own config question."""
+        self.assert_allowed(
+            self.payload(
+                "User-operated endpoint validation",
+                "If a version can only be confirmed by requesting an endpoint, may I "
+                "ask you to run that request yourself against a host you own?",
+                "No (Recommended)",
+                "Yes, I may be asked. You would run the request and paste the response back.",
+            ),
+            "the interview question that configures this very capability",
+        )
+
+    def test_other_interview_questions_are_not_blocked(self):
+        for header, question in [
+            ("Web research", "May I use web research if Censys alone can't identify the product?"),
+            ("Deep dive", "Should I run the deeper signature hunt?"),
+            ("Credit budget", "Cap the Censys credits for this run?"),
+            ("Version breakdown", "Break the exposed population down by version?"),
+            ("Write report files", "Write reports/<slug>.spec.json and .md at the end?"),
+        ]:
+            with self.subTest(header=header):
+                self.assert_allowed(self.payload(header, question, "Yes", "No"), header)
+
+    def test_ordinary_questions_are_not_blocked(self):
+        for question in [
+            "Should I run the request for the Canada count as well?",
+            "Which country should the second count use?",
+            "Shall I paste the response into the report?",
+        ]:
+            with self.subTest(question=question[:40]):
+                self.assert_allowed(self.payload("Question", question, "Yes"), question)
+
+    def test_a_real_probe_instruction_is_blocked(self):
+        for question in [
+            "Please run: curl --include --max-time 10 https://1.2.3.4/status and paste the output back.",
+            "Run `curl -sSI https://your-host/version` and paste what comes back.",
+            "Use wget -S https://your-appliance/api/version and share the headers.",
+        ]:
+            with self.subTest(question=question[:40]):
+                self.assert_blocked(
+                    self.payload("Version check", question, "OK"), question
+                )
+
+
+class InterviewIsNotSelfBlocking(unittest.TestCase):
+    """The interview runs before capabilities exist, so it must not be gated.
+
+    Belt and braces alongside the narrowed regex: even if a future pattern
+    over-matches, the gate is inert until `tsa_capabilities action=set` has run.
+    """
+
+    def setUp(self):
+        self.source = PLUGIN_TS.read_text()
+
+    def test_caps_track_whether_registration_happened(self):
+        self.assertRegex(self.source, r"registered:\s*boolean")
+        self.assertRegex(self.source, r"registered:\s*false", "defaults must be unregistered")
+
+    def test_the_question_gate_requires_registration(self):
+        self.assertRegex(
+            self.source,
+            r'input\.tool === "question" && caps\.registered',
+            "the question gate must be inert before capabilities are registered, "
+            "or it blocks the interview that sets them",
+        )
+
+    def test_setting_capabilities_marks_them_registered(self):
+        self.assertRegex(self.source, r"caps\.registered = true")
+
+    def test_the_env_var_counts_as_registration(self):
+        """bin/tsa already made the choices; the unattended path has no interview."""
+        self.assertRegex(self.source, r'TSA_CAPABILITIES env",\s*registered: true')
 
 
 class ResolvedByOpencode(unittest.TestCase):

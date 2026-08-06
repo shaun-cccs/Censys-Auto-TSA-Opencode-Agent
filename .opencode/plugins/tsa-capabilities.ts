@@ -68,6 +68,10 @@ type Caps = {
   deepDive: DeepDive
   versionBreakdown: boolean
   writeReports: boolean
+  /** True once tsa_capabilities action=set has run for this session. The
+   *  startup interview happens before that, and must not be gated by the
+   *  very flags it is asking the user to choose. */
+  registered: boolean
   callBudget: number | null
   callsUsed: number
   source: string
@@ -80,6 +84,7 @@ const DEFAULTS: Caps = {
   deepDive: "after",
   versionBreakdown: false,
   writeReports: true,
+  registered: false,
   callBudget: null,
   callsUsed: 0,
   source: "default (fail-closed)",
@@ -115,7 +120,7 @@ function summarise(c: Caps): string {
 function fromEnv(): Caps | null {
   const raw = process.env.TSA_CAPABILITIES
   if (!raw) return null
-  const caps: Caps = { ...DEFAULTS, source: "TSA_CAPABILITIES env" }
+  const caps: Caps = { ...DEFAULTS, source: "TSA_CAPABILITIES env", registered: true }
   for (const pair of raw.split(/[\s,]+/).filter(Boolean)) {
     const [k, v] = pair.split("=")
     const on = v === "on" || v === "true" || v === "yes" || v === "1"
@@ -220,6 +225,7 @@ export const TsaCapabilities: Plugin = async ({ client }) => {
           if (args.writeReports !== undefined) caps.writeReports = args.writeReports
           if (args.callBudget !== undefined) caps.callBudget = args.callBudget > 0 ? args.callBudget : null
           caps.source = `interview by ${context.agent}`
+          caps.registered = true
           byRoot.set(root, caps)
           return `Capabilities registered and now enforced for every subagent in this run:\n${summarise(caps)}`
         },
@@ -249,16 +255,24 @@ export const TsaCapabilities: Plugin = async ({ client }) => {
           "Skip step 3b and any release-artifact research, and rely on Censys evidence only.",
         )
       }
-      if (input.tool === "question" && !caps.endpointValidation) {
-        // Only the endpoint-validation ask is gated; every other question is
-        // fine. The patterns below are deliberately high-precision - they match
-        // the concrete probe instruction from the step 0b protocol, not the
-        // general topic. A vaguer pattern (e.g. "run the request") would block
-        // legitimate questions, which is a worse failure than missing one.
-        // This is a backstop; censys-fingerprint is instructed not to ask at all
-        // when the capability is off.
+      if (input.tool === "question" && caps.registered && !caps.endpointValidation) {
+        // Gated ONLY after capabilities have been registered. The startup
+        // interview necessarily runs before registration and necessarily talks
+        // about endpoint validation - gating it there blocked the very question
+        // that configures this flag, which is exactly what happened in practice.
+        //
+        // The pattern matches a concrete probe COMMAND, not prose about the
+        // topic. An earlier version matched the phrase "user-operated endpoint"
+        // and so blocked the interview's own question header. Note the plugin
+        // sees JSON.stringify of the whole payload - headers, option labels and
+        // descriptions included - so anything that merely discusses the feature
+        // will be in scope. Match tools, not talk.
+        //
+        // This is only a backstop. censys-fingerprint is already instructed not
+        // to ask when the capability is off, and the failure it guards against
+        // is mild: a question the user can simply decline.
         const text = JSON.stringify(output?.args ?? {}).toLowerCase()
-        if (/\bcurl\b|--include|user-operated endpoint|paste the (status|response|headers)/.test(text)) {
+        if (/\bcurl\s+-|\bcurl\s+http|\bwget\s|--include\b|-i\s+https?:\/\//.test(text)) {
           throw blocked(
             "user-operated endpoint validation",
             "the user did not authorise being asked to probe a host for this run.",

@@ -112,7 +112,9 @@ def ts_regex(name: str) -> str:
     """
     source = PLUGIN_TS.read_text()
     patterns = {
-        "endpoint_probe": r"if \(/([^/]+)/\.test\(text\)\) \{",
+        # The body may contain escaped slashes (e.g. https?:\/\/), so match
+        # either a non-slash character or any backslash-escaped pair.
+        "endpoint_probe": r"if \(/((?:[^/\\]|\\.)+)/\.test\(text\)\)",
     }
     match = re.search(patterns[name], source)
     if not match:
