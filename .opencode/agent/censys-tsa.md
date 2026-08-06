@@ -72,7 +72,12 @@ Ask all five in a single `question` call:
      I still measure real spend separately.
 5. **Write report files** - "Write `reports/<slug>.spec.json` and `.md` at the
    end?"
-   - "Yes (Recommended)" / "No, just tell me in chat"
+   - "Yes (Recommended)" - durable artifact with the full rationale, every query
+     variant, credits, caveats and sources
+   - "No, just the summary in chat" - nothing written to disk
+   - **Either way you print the same compact summary** (step 7). This choice
+     only controls whether a file is also written. Never offer to dump raw spec
+     JSON into the chat as the alternative - nothing reads it there.
 6. **Version breakdown** - "Break the exposed population down by version?"
    - "No, baseline only (Recommended)" / "Yes, show a per-version distribution"
    - A distribution costs an aggregation per field and makes the report much
@@ -188,8 +193,13 @@ When it runs, invoke `@censys-deepdive` with the validated base query and the
 step 6 counts. It returns the `deep_dive` spec fragment. Report the delta.
 
 **Step 9 - persist.** If `writeReports` is enabled, assemble the merged spec and
-invoke `@censys-report`. If it is disabled, print the assembled spec in the chat
-instead and say that nothing was written to disk.
+invoke `@censys-report`.
+
+If it is disabled, simply omit the `Full report:` line from your step 7 summary
+and say nothing was written to disk. **Do not dump the spec JSON into the chat.**
+The summary is the deliverable; raw JSON has no reader here and buries the
+numbers the user asked for. If they want the spec, they can re-run with report
+writing enabled.
 
 ## Spec assembly - your core job
 

@@ -171,6 +171,31 @@ class Prompts(unittest.TestCase):
                 self.assertIn("Widened query", text)
                 self.assertIn("Caveats", text)
 
+    def test_summary_is_printed_even_when_no_file_is_written(self):
+        """writeReports controls the FILE, not the terminal format.
+
+        An earlier version told the interactive orchestrator to dump raw spec
+        JSON into the chat when report writing was off. Nothing reads JSON in a
+        chat, and it buried the counts the user actually asked for.
+        """
+        text = body("censys-tsa")
+        self.assertRegex(
+            text, r"(?i)do not dump the spec json",
+            "censys-tsa must not offer a JSON dump as the no-file alternative",
+        )
+        self.assertRegex(
+            text, r"(?i)omit the `Full report:` line",
+            "the no-file path should just drop the report line from the summary",
+        )
+
+    def test_unattended_path_appends_json_without_replacing_the_summary(self):
+        """bin/tsa needs the JSON to parse, but a human still reads the summary."""
+        text = body("censys-tsa-auto")
+        self.assertRegex(
+            text, r"(?i)in addition to it, never instead of it",
+            "the spec JSON must accompany the summary, not replace it",
+        )
+
     def test_fingerprint_keeps_cve_version_scoping_mandatory(self):
         """The gate covers the distribution table, never the scoping."""
         text = body("censys-fingerprint")

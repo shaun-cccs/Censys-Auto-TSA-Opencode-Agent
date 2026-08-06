@@ -120,8 +120,13 @@ answer; a confident wrong number is not.
 7. If `writeReports` is enabled, assemble the merged spec and invoke
    `@censys-report` with it and the slug. **This is the output contract that
    `bin/tsa` reads: a run that should have produced `reports/<slug>.spec.json`
-   and did not is a failed run.** If `writeReports` is disabled, print the
-   assembled spec as JSON in your final message instead.
+   and did not is a failed run.**
+
+   If `writeReports` is disabled, nothing is written, so `bin/tsa` has no file
+   to read. In that case only, append the assembled spec as a single ```json
+   fenced block *after* the summary in step 8, so the wrapper can recover it.
+   The block is machine payload; the summary above it is still what a human
+   reads. Never let the JSON replace the summary.
 
 8. Finish with the compact summary below. The queries and the two counts are
    the point; supporting detail belongs in the written report, not here.
@@ -147,8 +152,11 @@ answer; a confident wrong number is not.
    ````
 
    Never print the honeypot or country query variants, or any platform URL.
-   Credits are one line, always shown, always measured. Omit `Full report:` when
-   `writeReports` is disabled, and print the assembled spec JSON instead.
+   Credits are one line, always shown, always measured.
+
+   **Always print this summary, on every run.** When `writeReports` is disabled,
+   drop the `Full report:` line and append the spec JSON block described in step
+   7 below the summary - in addition to it, never instead of it.
 
 ## Spec assembly
 

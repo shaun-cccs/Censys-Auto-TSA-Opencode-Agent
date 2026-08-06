@@ -187,6 +187,22 @@ class Prompt(unittest.TestCase):
         self.assertIn("Do NOT invoke @censys-report", prompt)
         self.assertIn("```json", prompt)
 
+    def test_no_reports_still_demands_the_summary(self):
+        """The JSON block is for the wrapper; the summary is for the human.
+
+        writeReports controls whether a file is written, never whether the
+        compact summary is printed.
+        """
+        a = args(target="x", no_reports=True)
+        prompt = tsa.build_prompt(a, "x", tsa.build_capabilities(a))
+        self.assertIn("compact summary", prompt)
+        self.assertIn("in addition to the summary, never instead of it", prompt)
+
+    def test_reports_enabled_does_not_ask_for_a_json_dump(self):
+        a = args(target="x")
+        prompt = tsa.build_prompt(a, "x", tsa.build_capabilities(a))
+        self.assertNotIn("```json", prompt)
+
 
 class ExtractSpec(unittest.TestCase):
     """--no-reports recovers the spec from the agent's message, not from disk."""

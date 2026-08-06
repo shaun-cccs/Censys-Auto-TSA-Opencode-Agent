@@ -158,9 +158,14 @@ def build_prompt(args: argparse.Namespace, slug: str, capabilities: str) -> str:
 
     if args.no_reports:
         lines += [
-            "Report writing is disabled. Do NOT invoke @censys-report. Instead,",
-            "print the fully assembled spec as a single JSON object in your final",
-            "message, inside a ```json fenced block.",
+            "Report writing is disabled. Do NOT invoke @censys-report.",
+            "Still print the normal compact summary - product, baseline query and",
+            "counts, widened query if any, basis and credits, caveats - and simply",
+            "omit the `Full report:` line.",
+            "",
+            "Then, below the summary, append the fully assembled spec as a single",
+            "JSON object inside a ```json fenced block so this wrapper can recover",
+            "it. The block is in addition to the summary, never instead of it.",
         ]
     else:
         lines += [
