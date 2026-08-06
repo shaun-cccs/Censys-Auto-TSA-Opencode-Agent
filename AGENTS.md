@@ -136,6 +136,24 @@ harvested signal means what you think it means. Neither may use it to *find*
 signals, and principle six is never relaxed by it: research means vendor sites,
 repositories, advisories and registries - never the assessed hosts.
 
+## Tests
+
+```bash
+tests/run.sh          # fast: static checks, no agent runs, no Censys
+tests/run.sh --live   # also exercises plugin enforcement against real agents
+```
+
+Run the fast suite after changing an agent prompt, the plugin, or `bin/tsa`.
+Run `--live` after changing anything about capability enforcement. See
+`tests/README.md` for what each suite defends and why.
+
+Two invariants the tests enforce that are easy to break by accident:
+
+- **Never set `webfetch`/`websearch` to `ask`.** It hangs a subagent under
+  `opencode run`. Use `allow` and let the plugin gate it.
+- **Never put a behavioural change in `references/`.** That directory is a
+  verbatim carve of `SKILL.md`; changes belong in agent prompts.
+
 ## Two report surfaces
 
 They are not the same thing and must not be conflated.
