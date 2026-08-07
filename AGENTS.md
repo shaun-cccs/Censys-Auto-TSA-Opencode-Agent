@@ -223,7 +223,7 @@ the merged spec to `censys-report`. The spec schema is defined by
 | --- | --- |
 | the seven principles (already in every prompt) | `tsa ref principles` |
 | tools, prerequisites, rate limits, credentials | `tsa ref workspace` |
-| 0, 0b - CVE intake, affected population | `tsa ref cve-workflow` |
+| 0 - CVE intake; 0b - version derivation, for **any** named version, CVE or not | `tsa ref cve-workflow` |
 | 1, 2, 3, 3b - probe, tagging, fingerprinting, web research | `tsa ref fingerprinting` |
 | aggregation semantics (the two knobs, bucket levels, aliases, HONEYPOT) | `tsa ref aggregation-semantics` |
 | 4 - CenQL query-drafting rules | `tsa ref cenql-rules` |

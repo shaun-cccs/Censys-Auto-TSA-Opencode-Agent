@@ -4,17 +4,17 @@ SKILL.md (1497 lines). This copy is canonical for this kit.
 Source lines: 1002-1220
 
 Step -> reference file map (the skill's inline "see step N" pointers resolve here):
-  the seven principles    -> tsa ref principles (already in every agent prompt)
-  workspace, credentials  -> tsa ref workspace
-  steps 0, 0b  (CVE)      -> tsa ref cve-workflow
-  steps 1, 2, 3, 3b       -> tsa ref fingerprinting
-  aggregation semantics   -> tsa ref aggregation-semantics
-  step 4  (CenQL rules)   -> tsa ref cenql-rules
-  steps 5, 6, 7           -> tsa ref counting-and-report
-  step 8  (deep dive)     -> tsa ref deep-dive
-  step 9  (persistence)   -> tsa ref report-spec
-  credit costs            -> tsa ref credits
-  worked examples         -> tsa ref examples
+  the seven principles       -> tsa ref principles (already in every agent prompt)
+  workspace, credentials     -> tsa ref workspace
+  steps 0, 0b  (CVE/version) -> tsa ref cve-workflow
+  steps 1, 2, 3, 3b          -> tsa ref fingerprinting
+  aggregation semantics      -> tsa ref aggregation-semantics
+  step 4  (CenQL rules)      -> tsa ref cenql-rules
+  steps 5, 6, 7              -> tsa ref counting-and-report
+  step 8  (deep dive)        -> tsa ref deep-dive
+  step 9  (persistence)      -> tsa ref report-spec
+  credit costs               -> tsa ref credits
+  worked examples            -> tsa ref examples
 -->
 
 
@@ -90,7 +90,8 @@ Look for internal names the vendor never marketed but left in the code:
 | **Acquired-company / legacy brand name** | **survives rebranding in SSO endpoints, asset paths and redirect targets.** `viptela` for Cisco Catalyst SD-WAN Manager - Cisco acquired Viptela years earlier, yet the domain still appears in live SAML endpoints. Recovered +112 hosts the product's own name missed. |
 | **Quoted HTML attribute** | ``body=~`id=\"login_left\"` `` - a vendor's own markup. Escape the quotes (see `tsa doc regex`); unquoted, the same token matches 36,017 unrelated login pages |
 | Product-specific cookie name | `FESESSIONID`, `JSESSIONID` - match with ``host.services.endpoints.http.headers:(key="Set-Cookie" and value=~`FESESSIONID`)`` |
-| Static asset or bundle path | `/s/.../_/download/resources/`, a versioned JS bundle name |
+| Static asset or bundle path | `/s/.../_/download/resources/`, a versioned JS bundle name - identifies the **product** |
+| **The same asset, taken by its hash** | **identifies the *release*.** A content-hashed name or cache-busting query string - `main.<app>.<contenthash>.css`, `bundle.js?<hash>` - changes between versions. That is a tier 2b signal, not a widening signal: read `tsa ref cve-workflow`. Do not improvise a version query from it, and do not read a failed guess at its format as proof the version is invisible |
 | Custom or vendor HTTP header | `X-AUSERNAME`, `X-Forwarded-Server` values, vendor `Server` strings - query with `host.services.endpoints.http.headers:(key="X-AUSERNAME")` |
 | Login-form field or JS variable | a uniquely named form input or JS global |
 | Copyright / footer string | an exact vendor footer line |

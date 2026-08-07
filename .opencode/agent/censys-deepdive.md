@@ -103,6 +103,12 @@ signal you test is tested against stored Censys data, never against the target.
 2. `tsa ref deep-dive` - steps 8a-8e, your main procedure
 3. `tsa ref aggregation-semantics` - **before any aggregation**
 4. `tsa ref cenql-rules` - **before writing any query**
+5. `tsa ref cve-workflow` tier 2b - **only if 8a-bis turns up a release-specific
+   artifact** (a content-hashed asset name, a cache-busting query string, a build
+   ID). That is a *version* signal, not a widening signal, and tier 2b is the
+   procedure for it. Do not improvise a version query, and never report "the
+   version is not observable" off the back of one failed guess at an opaque
+   token's format - that is a tier 3 conclusion and tier 3 has to be earned.
 
 ## Web research in the deep dive
 
@@ -143,7 +149,10 @@ corroborate it.
   doc links above internal codenames. Remember SSO-fronted instances are
   invisible to title and body signals. Check what a candidate MISSES, by
   version - old-firmware bias is real. Measure the symmetric difference when
-  replacing a fingerprint, not just the gain.
+  replacing a fingerprint, not just the gain. **A bundle *path* identifies the
+  product; the same asset's *content hash* identifies the release** - hand the
+  latter to tier 2b (`tsa ref cve-workflow`) and report it in `notes` rather than
+  `or`-ing it into the widened query.
 - **8b** test each candidate in isolation with `and not (<base query>)` and read
   the buckets. Discard candidates whose incremental hits are incoherent.
   **These tests are independent of each other - batch them as parallel bash

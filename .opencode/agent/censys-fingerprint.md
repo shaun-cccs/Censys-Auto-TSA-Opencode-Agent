@@ -111,7 +111,9 @@ paste the response back. Never ask for credentials, cookies, or auth headers.
 2. `tsa ref aggregation-semantics` - **before any aggregation**
 3. `tsa ref cenql-rules` - **before writing any query**
 4. `tsa ref fingerprinting` - steps 1, 2, 3, 3b (your main procedure)
-5. `tsa ref cve-workflow` - steps 0, 0b, **only if the target is a CVE**
+5. `tsa ref cve-workflow` - steps 0, 0b. Step 0 is CVE-only, but **step 0b is
+   version derivation and applies whenever the target names a version**
+   (`LobeChat 1.123.1`, `Jellyfin 10.11.0`), CVE or not. Read it in that case too.
 6. `tsa ref examples` - on demand, when a step is ambiguous
 
 ## Your steps
@@ -119,6 +121,9 @@ paste the response back. Never ask for credentials, cookies, or auth headers.
 - **0 / 0b** if the target is a CVE: retrieve the record, then derive the
   affected population from version evidence. `vulns.id` is a floor, never the
   answer. Work the three tiers and declare which one you landed on.
+  **If the target names a version but no CVE, step 0 does not apply and step 0b
+  still does** - work the same tiers, and do not settle for tier 3 ("not remotely
+  observable") until tier 2b's release-artifact route has actually been tried.
 - **1** cheap full-text seed, then aggregate `product` across **all three** tag
   trees: `host.services.software`, `host.services.hardware`,
   `host.operating_system`. Never declare a product untagged without all three.

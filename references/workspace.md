@@ -52,7 +52,7 @@ tsa doc host --grep favicon
 | --- | --- | --- |
 | `tsa ref principles` | all agents | the seven principles - already in your system prompt |
 | `tsa ref workspace` | all agents | this file |
-| `tsa ref cve-workflow` | `censys-fingerprint` | steps 0, 0b |
+| `tsa ref cve-workflow` | `censys-fingerprint` | steps 0, 0b - CVE intake, and version derivation for **any** named version |
 | `tsa ref fingerprinting` | `censys-fingerprint` | steps 1, 2, 3, 3b |
 | `tsa ref aggregation-semantics` | shared | the two knobs, bucket levels, aliases, HONEYPOT |
 | `tsa ref cenql-rules` | shared | step 4 query-drafting rules |
@@ -60,7 +60,7 @@ tsa doc host --grep favicon
 | `tsa ref deep-dive` | `censys-deepdive` | step 8 |
 | `tsa ref report-spec` | `censys-report` | step 9 |
 | `tsa ref credits` | `censys-tsa`, `censys-report` | credit costs and measurement |
-| `tsa ref examples` | on demand | three worked examples |
+| `tsa ref examples` | on demand | four worked examples - untagged, tagged, CVE, tier 2b version |
 
 ## Prerequisites
 

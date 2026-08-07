@@ -4,17 +4,17 @@ SKILL.md (1497 lines). This copy is canonical for this kit.
 Source lines: 691-834
 
 Step -> reference file map (the skill's inline "see step N" pointers resolve here):
-  the seven principles    -> tsa ref principles (already in every agent prompt)
-  workspace, credentials  -> tsa ref workspace
-  steps 0, 0b  (CVE)      -> tsa ref cve-workflow
-  steps 1, 2, 3, 3b       -> tsa ref fingerprinting
-  aggregation semantics   -> tsa ref aggregation-semantics
-  step 4  (CenQL rules)   -> tsa ref cenql-rules
-  steps 5, 6, 7           -> tsa ref counting-and-report
-  step 8  (deep dive)     -> tsa ref deep-dive
-  step 9  (persistence)   -> tsa ref report-spec
-  credit costs            -> tsa ref credits
-  worked examples         -> tsa ref examples
+  the seven principles       -> tsa ref principles (already in every agent prompt)
+  workspace, credentials     -> tsa ref workspace
+  steps 0, 0b  (CVE/version) -> tsa ref cve-workflow
+  steps 1, 2, 3, 3b          -> tsa ref fingerprinting
+  aggregation semantics      -> tsa ref aggregation-semantics
+  step 4  (CenQL rules)      -> tsa ref cenql-rules
+  steps 5, 6, 7              -> tsa ref counting-and-report
+  step 8  (deep dive)        -> tsa ref deep-dive
+  step 9  (persistence)      -> tsa ref report-spec
+  credit costs               -> tsa ref credits
+  worked examples            -> tsa ref examples
 -->
 
 
