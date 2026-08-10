@@ -82,6 +82,19 @@ Rules:
     disjunct over dropping a signal that was recovering real hosts. Try
     escaping the quotes first, though - a properly quoted attribute is often
     precise enough to need no gate.
+  - **Every host count written into this kit's references is a dated
+    measurement, not a constant - trust the ratio, never the absolute.** Censys
+    scan coverage moves, so the illustrative figures here drift, sometimes by
+    a lot. Re-measured against the numbers recorded in these references: bare
+    `login_left` was 36,017 and is now 212,659; the quoted form
+    ``id=\"login_left\"`` was 2,558 and is now 6,224; ``value=~`Jetty` `` was
+    199,543 and is now 198,488. What survived unchanged is every *invariant* the
+    numbers were cited to demonstrate - quoting an attribute still cuts the
+    population by well over an order of magnitude (212,659 to 6,224), and the
+    inline-flag trap ``(?i)jetty`` still returns exactly **0**. Cite these
+    figures as evidence of direction and magnitude; re-measure before quoting
+    any of them as a current count in a report.
+  - HTTP headers are nested: bind key and value together with
   - HTTP headers are nested: bind key and value together with
     ``host.services.endpoints.http.headers:(key="Server" and value=~`[Jj]etty`)``.
     Key-only presence checks work too. `Set-Cookie` values are queryable with
@@ -101,6 +114,20 @@ Rules:
 - **Check the hardware tree for appliances.** If the target is a physical or
   virtual appliance and the software tree is empty, aggregate
   `host.services.hardware.product` before concluding the product is untagged.
+- **Never assume the hardware and software trees agree - measure the difference
+  both ways.** Agreement varies enormously by product, so which tree you query
+  can change the count by an order of magnitude. Measured: Fortinet FortiGate is
+  perfectly coextensive - `hardware:(vendor="fortinet" and product="fortigate")`
+  and `software:(vendor="fortinet" and product="fortios")` both return 81,445
+  hosts with **0** difference in either direction, so either tree serves. But
+  Check Point's `hardware.product="firewall-1"` returns 149,535 hosts of which
+  only 15,308 carry any Check Point *software* tag - about **90% are
+  hardware-tagged only** - and of 231,672 hosts tagged `connect_vpn` in hardware,
+  75,144 have no software tag at all. Run
+  `'<hardware query> and not (<software query>)'` and its converse before
+  choosing, and say in the report which tree the count came from.
+- **A hardware tag is good enrichment and often a bad base query.** Where the
+  tag over-matches (step 2's over-counting check), keep an evidence fingerprint
 - **A hardware tag is good enrichment and often a bad base query.** Where the
   tag over-matches (step 2's over-counting check), keep an evidence fingerprint
   as the base and `and` the tag on only to scope by version.

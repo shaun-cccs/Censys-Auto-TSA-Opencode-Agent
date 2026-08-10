@@ -71,6 +71,11 @@ tsa search \
   'host.services.endpoints.http.html_title: "N-able N-central" and not host.services.software.product="n-central"' \
   --max-results 3 --format table
 # -> 0 hits: tag coverage is complete, no `or` widening needed
+#    CAUTION: 0 is ambiguous. It means complete coverage ONLY if the signal is
+#    causally independent of the tag. If Censys derives the tag FROM that title,
+#    0 is circular and proves nothing - see the independence test in
+#    `tsa ref deep-dive`. Check the other direction (`tag and not signal`) and
+#    prefer a different-layer signal (cert, JARM, port) to corroborate.
 
 # 4. run the TSA on the nested vendor+product query
 tsa assess \

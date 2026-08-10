@@ -132,6 +132,38 @@ population is the check - a clean SSO population shows a handful of redirect
 titles (`301 Moved Permanently`, `Redirecting...`, `Document Moved`) rather than
 a long tail of unrelated products.
 
+**Corroboration must be causally INDEPENDENT of what it corroborates, and
+"0 hosts outside" is the signature of circularity, not of agreement.** Censys
+builds many tags by matching exactly the artifacts you would reach for as
+confirmation - HTML title, `Server` header, banner, favicon. When the tag is
+derived from the title, comparing them proves nothing: the check re-reports the
+fingerprint and looks like a clean validation. Measured, on the FortiGate
+appliance tag: `html_title: "ACME Access Only"` returns 81,406 hosts and
+**0** of them fall outside `hardware:(vendor="fortinet" and product="fortigate")`,
+while the tag exceeds the title by only ~40 hosts. Two populations that agree to
+within 0.05% in both directions are not independent witnesses; one is almost
+certainly the input to the other. Test it before believing an agreement:
+
+```bash
+tsa search '<signal> and not (<tag>)' --max-results 1   # 0 => signal may FEED the tag
+tsa search '<tag> and not (<signal>)' --max-results 1   # also ~0 => near-identical
+```
+
+If both directions are ~0, treat the pair as one signal, not as confirmation, and
+corroborate from a **different layer** instead - certificate subject, JARM, port,
+or `host.dns.names` - since those are not inputs to an HTTP-content tag.
+
+**Run the contamination check on TAG-based populations too, not only on evidence
+signals.** The rule above about aggregating `html_title` before gating applies
+equally to a step-2 tag query. It is what surfaces a tag whose population is
+uniform in a way a real product estate never is, and it costs one aggregation.
+Pair it with an ASN aggregation to separate a genuine dispersed estate from
+shared infrastructure: the FortiGate population above spread across Comcast,
+AT&T, Deutsche Telekom, Swisscom and a long tail, which is what a real appliance
+fleet looks like, whereas concentration in one hosting or CDN ASN means you are
+counting edge nodes rather than deployments.
+
+
 **Check what a candidate MISSES, not only what it adds - and check it by
 version.** Step 8b tests candidates by incremental gain. When you are choosing
 or replacing a *base* signal, run the comparison the other way as well:
