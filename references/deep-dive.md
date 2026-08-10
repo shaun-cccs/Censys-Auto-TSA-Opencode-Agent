@@ -201,6 +201,43 @@ Two corollaries that keep this consistent with the gate rule below:
   or certificate names. Use them to *find* the product; never add them to the
   total.
 
+**Neighbour as gate: the fronting component is the gate, never the disjunct.**
+A component the target is always deployed behind has high recall on the target
+and almost no precision - the profile that makes it useless as an `or` clause
+and ideal as an `and` gate (see `tsa ref cenql-rules` for the role triage).
+Measured, on Oracle Identity Governance: the `/identity/` context root alone
+matched 993 hosts (contaminated by Plex Media Server, SailPoint IdentityIQ,
+Fischer Identity, Teldat); the vendor's access-manager WebGate redirect alone
+matched 486 hosts (mostly a *different* product, the vendor's portal server,
+with zero overlap with the confirmed population). Neither half is a fingerprint.
+Their intersection was 6 hosts, 6/6 genuine, tripling a 3-host baseline. So:
+
+- **Do not let "sibling product, keep disjoint" or "substrate" exclude a signal
+  from gate duty.** Those labels are correct for a base disjunct and wrong for a
+  gate. A disjointness requirement between the target and its neighbours applies
+  to what you *count*, not to what you *filter with*.
+- **Require the gate to be observable at the unauthenticated boundary** - in the
+  same anonymous response the scanner already collected. This is what separates a
+  working gate from a failed one. An app-server or proxy header sits *behind* the
+  fronting layer and is only sometimes emitted, whereas an access-manager
+  redirect must answer the anonymous request, because that is its entire
+  function. Being a neighbour is not sufficient; revealing itself to an
+  unauthenticated request is.
+- **A signal that collapses to near-zero under a gate indicts the gate, not the
+  signal.** The 993-host signal above went to 1 under an app-server gate and was
+  written off as barren; under the access-manager gate it yielded 6. A correct
+  gate on a real population leaves a plausible remainder, so near-zero means the
+  gate is orthogonal to the target. Try at least two structurally different gates
+  before abandoning a signal that has real hosts in it.
+- **Declare the recall cost in the caveats.** A gated count is scoped to
+  instances *that have that neighbour*, which is a real and directional bias -
+  gating on one vendor's SSO silently excludes the same product behind any other.
+  Check whether the survivors collapse into a few organisations before treating
+  the gain as population growth: those 6 hosts were 2 organisations.
+- **Never let the gate migrate into the base.** Drop the weak product-specific
+  half and you are counting the neighbour - a different product, and in that
+  example an 80x larger number.
+
 **Corroboration must be causally INDEPENDENT of what it corroborates, and
 "0 hosts outside" is the signature of circularity, not of agreement.** Censys
 builds many tags by matching exactly the artifacts you would reach for as
@@ -232,6 +269,33 @@ AT&T, Deutsche Telekom, Swisscom and a long tail, which is what a real appliance
 fleet looks like, whereas concentration in one hosting or CDN ASN means you are
 counting edge nodes rather than deployments.
 
+**Measure the contamination BEFORE you gate. A signal that is already coherent
+must be shipped as a plain disjunct, never gated.** Gating is a precision
+instrument, so applying it to a signal that is already precise buys nothing and
+costs recall. Order of operations: aggregate `html_title` over the broad signal
+and read a handful of records *first*, then gate only what the contamination
+actually justifies. Measured counter-example, deliberately tested against the
+rule above: PeopleSoft is untagged by Censys in all three trees, its own
+`PS_TOKEN`/`SignOnDefault` cookie fingerprint finds 29 hosts, and its `/psp/`
+context root finds 225 - a 7.8x under-count by the direct fingerprint, with the
+population dominated by bare redirect stubs. That is the fronted-deployment
+signature, and the redirect-hop enumeration duly confirmed the residual genuine
+(`/psp/fscm/EMPLOYEE`, `/psp/hcprd/`, state-government hostnames). But the path
+was **already clean**, so gating it actively destroyed the finding: an
+access-manager gate took 225 to **0**, and an F5 gate took it to 109, discarding
+over half of a confirmed population. Near-zero after gating can indict the
+*decision to gate at all*, not merely the choice of gate - if the ungated signal
+was coherent, stop gating and keep it.
+
+**A structured multi-segment path is self-gating.** `/psp/<site>/<PORTAL_NODE>/`
+carries the product's own fixed vocabulary in later segments - PeopleSoft's
+`EMPLOYEE`, `SUPPLIER`, `CUSTOMER` nodes, its `cmd=login` parameter, its `/psc/`
+sibling root. 160 of those 225 hosts matched such a marker. Path *structure*
+supplies the specificity a gate would otherwise provide, so test the deeper
+segments before reaching for a neighbour: a first segment that looks generic in
+isolation is often unambiguous two segments in. This is the same lesson as
+quoting an HTML attribute rather than gating a bare token - prefer making the
+signal itself more specific over conjoining a second signal.
 
 **Check what a candidate MISSES, not only what it adds - and check it by
 version.** Step 8b tests candidates by incremental gain. When you are choosing
@@ -344,7 +408,21 @@ original, never as a replacement. State:
 - Each signature you added, what evidence justified it, and its incremental
   contribution.
 - Each candidate you tested and **rejected**, with the reason - this is what
-  makes the widened number defensible.
+  makes the widened number defensible. **Classify every rejection as one of two
+  kinds, because they are not equally final:**
+  - **empirically closed** - it was queried and the population is genuinely not
+    there (a 0 with a passing positive control, or an incremental population that
+    is coherently *not* the product). Safe to declare settled.
+  - **role judgement** - it was set aside as substrate, as a sibling product, as
+    too generic, or as untested. This is a judgement about the role it would
+    play, not a measurement of the data, and it **must be re-opened the moment
+    the role changes** - most often when a signal rejected as a disjunct becomes
+    a candidate gate.
+
+  Never hand another agent an undifferentiated "do not reintroduce these" list.
+  Mixing the two kinds hardens a role judgement into a fact and makes the blind
+  spot permanent across the handoff. Mark anything you never actually queried as
+  **untested with no count**, and never let it read as rejected.
 - A revised confidence statement: widening trades precision for recall, so say
   explicitly whether the new count is a better estimate or a loose upper bound.
 - **Total credit consumption across the session** - the second TSA run costs

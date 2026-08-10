@@ -82,6 +82,24 @@ Rules:
     disjunct over dropping a signal that was recovering real hosts. Try
     escaping the quotes first, though - a properly quoted attribute is often
     precise enough to need no gate.
+  - **Every signal has three possible roles: disjunct, gate, exclusion. Name the
+    role before you reject it.** A `or` clause adds hosts directly to the count,
+    so it needs **precision**. An `and` gate contributes no hosts at all and only
+    filters, so it needs **recall** - it may be arbitrarily over-broad at zero
+    cost provided it is present on nearly every real instance. Those are opposite
+    requirements, so the same signal is routinely worthless in one role and ideal
+    in the other. "Too generic to count" therefore does **not** imply "useless";
+    it is the normal profile of a good gate. When you discard a signal, record
+    which role you tested it in. Rejecting it as a disjunct is not rejecting it,
+    and a rejection list that does not name the role will be read by the next
+    agent as final.
+  - **Pick the gate your known false positives cannot satisfy.** Gate selection
+    is constructive, not lucky. Enumerate what is actually polluting the broad
+    signal, then ask what none of those contaminants could ever have. A generic
+    path polluted by unrelated IAM products and media servers is rescued by an
+    authentication component none of them can sit behind. A broad signal is only
+    "barren" once you have listed its contaminants and failed to find something
+    structurally impossible for all of them.
   - **Every host count written into this kit's references is a dated
     measurement, not a constant - trust the ratio, never the absolute.** Censys
     scan coverage moves, so the illustrative figures here drift, sometimes by
@@ -94,7 +112,6 @@ Rules:
     inline-flag trap ``(?i)jetty`` still returns exactly **0**. Cite these
     figures as evidence of direction and magnitude; re-measure before quoting
     any of them as a current count in a report.
-  - HTTP headers are nested: bind key and value together with
   - HTTP headers are nested: bind key and value together with
     ``host.services.endpoints.http.headers:(key="Server" and value=~`[Jj]etty`)``.
     Key-only presence checks work too. `Set-Cookie` values are queryable with
@@ -126,8 +143,6 @@ Rules:
   75,144 have no software tag at all. Run
   `'<hardware query> and not (<software query>)'` and its converse before
   choosing, and say in the report which tree the count came from.
-- **A hardware tag is good enrichment and often a bad base query.** Where the
-  tag over-matches (step 2's over-counting check), keep an evidence fingerprint
 - **A hardware tag is good enrichment and often a bad base query.** Where the
   tag over-matches (step 2's over-counting check), keep an evidence fingerprint
   as the base and `and` the tag on only to scope by version.
