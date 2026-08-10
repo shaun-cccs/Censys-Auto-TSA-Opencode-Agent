@@ -34,19 +34,38 @@ Rules:
   `tsa doc regex` first - escaping, anchor placement and the
   supported operator set are all sources of silent 0-hit results. Key points:
   - `:` is tokenized and case-insensitive; `=` is exact and case-sensitive.
-  - **Always quote a CIDR block.** `host.ip="10.0.0.0/24"` is correct; backticks
-    work identically. Unquoted, the `/` is rejected by the grammar and the whole
-    query fails with **HTTP 422 `Invalid character: '/'`** - so unlike most
-    mistakes in this file it costs you an error rather than a silent 0, but it
-    still burns the credit and the round trip. Measured on a subnet containing
-    two known hosts: `host.ip="163.127.5.0/24"` and
-    ``host.ip=`163.127.5.0/24` `` and `host.ip: "163.127.5.0/24"` all return 8;
-    `host.ip=163.127.5.0/24` returns the 422. The trap is that the adjacent
-    syntax is *legal* - a single bare address needs no quotes at all
-    (`host.ip=163.127.5.42` returns 1), because `ip` is its own type while a
-    CIDR block is parsed as a string, and unquoted strings must match
-    `[a-zA-Z][a-zA-Z0-9._-]*`, which admits neither `/` nor a leading digit.
-    When in doubt, quote it: quoting a single IP is harmless.
+  - **Always quote a CIDR block, and always give it a field.** Those are two
+    separate mistakes with two different symptoms, and the second is the
+    dangerous one. Measured on a subnet containing two known hosts:
+    `host.ip="163.127.5.0/24"`, ``host.ip=`163.127.5.0/24` `` and
+    `host.ip: "163.127.5.0/24"` all return 8. Unquoted,
+    `host.ip=163.127.5.0/24` fails loudly with **HTTP 422 `Invalid character:
+    '/'`** - definitive, not worth retrying, and 422 is deliberately absent from
+    `RETRYABLE_STATUS`. But **fieldless and quoted, `"163.127.5.0/24"` returns a
+    silent 0**, because a fieldless term is a full-text search and no document
+    contains that literal string. The failure path to watch for is the sequence:
+    unquoted CIDR 422s, you add quotes to fix it, you dropped the field along the
+    way, and the silent 0 reads as "nothing exposed in that subnet". A bare
+    fieldless CIDR 422s as well - entering a CIDR in the search bar with no field
+    is a **web-UI affordance that does not exist in the API**, whatever
+    `tsa doc cenql` implies.
+  - **The quoting rule is universal across fields, including the `ip_range`
+    ones.** `tsa doc cenql`'s type table shows `ip_range` with an unquoted
+    example (`125.8.0.0/13`), and that example is misleading: measured,
+    `host.autonomous_system.bgp_prefix=163.127.4.0/22` 422s while the quoted,
+    backticked and `:` forms each return 47. The other `ip_range` field is
+    `host.whois.network.cidrs`. Note also that these fields hold a CIDR as a
+    *value* to match exactly - they do not do containment, so they answer "which
+    hosts are in this announced prefix", not "which prefixes contain this host".
+  - The trap underneath all of this is that the adjacent syntax is *legal*: a
+    single bare address needs no quotes (`host.ip=163.127.5.42` returns 1),
+    because `ip` is its own type, while a CIDR block is parsed as a string, and
+    unquoted strings must match `[a-zA-Z][a-zA-Z0-9._-]*` - which admits neither
+    `/` nor a leading digit. When in doubt, quote it; quoting a single IP is
+    harmless. And per the positive-control rule below, a CIDR query returning 0
+    needs one before you believe it: `bgp_prefix="125.8.0.0/13"` returns 0
+    because no indexed host announces that prefix, which is indistinguishable
+    from a syntax error until you test a prefix you know is populated.
   - Bind criteria to the *same* object with nested syntax:
     `host.services: (port=443 and endpoints.http.html_title="...")`.
     Plain `and` only requires both values somewhere on the record.
