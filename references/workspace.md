@@ -83,16 +83,24 @@ outside it, and never write into the kit's own installation.
 ## Rate limits
 
 `tsa search` enforces a min interval, a per-minute cap, and a rolling request
-budget persisted across runs in `~/.censys_query_rate_state.json`. Every Censys
-subcommand shares it. On `request budget exhausted`, wait rather than raising the
-budget. Aggregations are cheap per request but `--suggest-fields` issues one
-request per field - use a targeted field list when the budget is tight. Keep
-validation queries at `--max-results 5`; TSA counts fetch one hit each and read
-`total_hits`. `tsa cve` does not touch Censys at all, so it is outside this
-budget entirely.
+budget persisted across runs. Every Censys subcommand shares it. On `request
+budget exhausted`, wait rather than raising the budget. Aggregations are cheap
+per request but `--suggest-fields` issues one request per field - use a targeted
+field list when the budget is tight. Keep validation queries at
+`--max-results 5`; TSA counts fetch one hit each and read `total_hits`.
+`tsa cve` does not touch Censys at all, so it is outside this budget entirely.
+
+**Read the budget with `tsa budget`, and never by opening the state file.** The
+ledger lives outside any workspace, so reading it directly trips an
+`external_directory` permission prompt - which, raised inside a subagent, has no
+UI to answer it and hangs the run indefinitely. `tsa budget` reports the same
+state and costs nothing. The same applies to the credit ledger: use
+`tsa credits`.
 
 The budget is shared across subagents. A `censys-fingerprint` run that burns the
 budget will stall the `censys-deepdive` run that follows it in the same session.
+It is also shared across *concurrent* runs on the same machine, so a second TSA
+started in another session draws down the same allowance.
 
 ## Credentials
 

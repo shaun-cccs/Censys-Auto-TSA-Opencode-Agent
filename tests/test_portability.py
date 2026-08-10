@@ -75,7 +75,13 @@ class NoPathsInShippedProse(unittest.TestCase):
         )
 
     def test_no_absolute_paths(self):
-        pattern = re.compile(r"(/home/|/Users/|/opt/|\$HOME/|~/(?!\.censys))")
+        #  No `~/.censys*` exemption. There used to be one, and it cost 45
+        #  minutes: `references/workspace.md` named the rate-state file by path,
+        #  a `censys-deepdive` subagent dutifully read it, and reading outside
+        #  the workspace raised an `external_directory` permission prompt that no
+        #  subagent has a UI to answer. State files are reached through
+        #  `tsa budget` and `tsa credits`; see rule 4 of the contributor guide.
+        pattern = re.compile(r"(/home/|/Users/|/opt/|\$HOME/|~/)")
         for path in self.shipped():
             for lineno, line in enumerate(self.prose(path).splitlines(), 1):
                 with self.subTest(file=path.name, line=lineno):

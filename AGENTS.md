@@ -49,10 +49,21 @@ user's output, not part of the kit.
 3. **The principles are generated, not written.** Edit `references/principles.md`
    and run `python scripts/gen_agents.py`. Never edit the block inside an agent
    file.
-4. **Never set `webfetch`/`websearch` to `ask`** in agent frontmatter. An `ask`
+4. **No `ask`-class permission may be reachable from a subagent.** An `ask`
    inside a subagent hangs forever under `opencode run`, because `--auto` does not
-   reach subagent sessions and there is no UI to prompt in. Use `allow` and let
-   the plugin be the gate.
+   reach subagent sessions and there is no UI to prompt in. Concretely:
+   - Never set `webfetch`/`websearch` to `ask` in agent frontmatter. Use `allow`
+     and let the plugin be the gate.
+   - Never have an agent touch a path outside the workspace, which triggers
+     opencode's `external_directory` permission. This bit us for real: a
+     `censys-deepdive` run stalled for 45 minutes reading the rate-state file
+     from the home directory, on a prompt nothing could answer. State files are
+     reached through `tsa budget` and `tsa credits`, never by path - which rule 1
+     already required.
+
+   When adding a tool call to any agent prompt, ask which permission it evaluates
+   and whether the answer can be `ask`. If it can, the subagent will hang, not
+   fail.
 
 ## The seven principles
 
@@ -241,7 +252,8 @@ the merged spec to `censys-report`. The spec schema is defined by
   `not labels: "HONEYPOT"` and `host.location.country=...` itself.
 - **Only the base query goes in the spec.** The renderer derives the honeypot and
   country variants and the platform URLs. Never paste a URL into a spec.
-- **The rate-limit budget is shared across subagents** via
-  `~/.censys_query_rate_state.json`. Budget burned by one subagent stalls the next.
+- **The rate-limit budget is shared across subagents and across concurrent runs.**
+  Budget burned by one subagent stalls the next. Read it with `tsa budget`, never
+  by opening the state file - see rule 4.
 - The user-facing question tool in this project is `question`. The upstream skill
   calls it `ask_user`; that name does not exist here.
