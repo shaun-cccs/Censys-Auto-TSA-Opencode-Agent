@@ -132,6 +132,75 @@ population is the check - a clean SSO population shows a handful of redirect
 titles (`301 Moved Permanently`, `Redirecting...`, `Document Moved`) rather than
 a long tail of unrelated products.
 
+**The fronting layer is not always a cloud IdP.** The same reasoning covers an
+on-premises access-management component, and very often that component is
+**another product from the same vendor** - an access-manager WebGate, a web
+dispatcher, a policy agent, an API gateway. Do not restrict this check to SAML
+and OIDC tenants.
+
+**An empty harvest is positive evidence, not absence of evidence. Never report a
+seed as "signature-barren" on missing content alone.** No `html_title`, no body
+markup, no favicon and a bare 301/302 is the *diagnostic signature of a fronted
+deployment*, and it is the trigger condition for this whole section. When the
+harvest comes back empty, the mandatory next move is to enumerate the redirect
+chain in full - **every hop, and the destination host of every hop** - because the
+evidence has moved out of the page and into the redirect. Aggregating a field
+cannot find this: a hop to a *different* hostname is relational evidence, and a
+field-by-field checklist has no cell for it. Read the confirmed records
+individually and ask what each host talks to. At small seed sizes (single digits)
+per-host narrative reading beats aggregation outright - aggregating `html_title`
+over such a seed returns `302 Found` and teaches you nothing.
+
+**With a redirect signal, ask which END of the redirect the product sits on.
+Getting this backwards can invert a count almost entirely.** The rule above tells
+you to hunt with the redirect target, and that is sound - but a redirect links two
+machines, and the matched token tells you which one is running the product. Do not
+decide this by same-host versus cross-host; decide it by **what the token names**:
+
+- **The token names the DESTINATION's product - do not count the emitting host.**
+  It is a client of the product, usually on unrelated infrastructure. Shibboleth
+  IdP, measured: `redirect_chain.path` matching `/idp/profile/SAML2` returns
+  **2,440** hosts while the same string in the same-host `uri` field returns
+  **16** - roughly **99%** of the apparent population is referral traffic. The
+  records are `moodle-admin-test.warwick.ac.uk` redirecting to
+  `idp.warwick.ac.uk` and `uiscitrix.uis.edu` redirecting to `uisshibb1.uis.edu`.
+  Every one is a Service Provider; the real IdPs are the *destinations*. Reporting
+  2,440 would have counted Moodle and Citrix installs as Shibboleth.
+- **The token names the HOST's OWN product or vendor - count it, even though the
+  destination is a different machine.** An appliance redirecting to its vendor's
+  cloud, or an SSO-fronted product posting to its own vendor tenant, is still the
+  product. Measured: `Location` matching `meraki\.com` returns **6,320** hosts, of
+  which **4,452** independently carry a Cisco vendor tag - genuine Meraki devices
+  bouncing to the Meraki cloud dashboard. Cisco Catalyst SD-WAN Manager is the
+  same shape: the acquired-company token `viptela` appears in the **body** the
+  product itself serves (136 hosts), which is same-host content pointing at an
+  external tenant. Discarding these as "cross-host" would throw away thousands of
+  true positives.
+- **The token names a THIRD-PARTY service shared across vendors - identifies
+  neither end.** `Location` matching `\.okta\.com` returns **10,030** hosts of no
+  single product. Useless as a disjunct - and precisely the neighbour-gate case
+  below.
+
+Use the field taxonomy as a verification aid, not as the rule: `endpoints.path`,
+`endpoints.http.uri` and `body` are all **same-host** - the scanner requested or
+received them from this host - whereas `Location` and `redirect_chain.path` may
+describe another machine, so compare `redirect_chain.hostname` against the host's
+own IP and certificate names before deciding which of the three cases you are in.
+
+Two corollaries that keep this consistent with the gate rule below:
+
+- **Gates are exempt from all of this.** A gate may name a third party or another
+  machine freely, because it is evidence about the surrounding architecture rather
+  than about what is installed here. In the Oracle Identity Governance case the
+  product hop was self-referential (`<ip> -> <same ip> /identity/`) while the
+  access-manager gate hop pointed at a different hostname - the correct shape is
+  **the counted signal must identify this host's product; the filtering signal
+  need not.**
+- **A destination-naming match is still a pivot.** Those 2,440 SPs enumerate the
+  hostnames of real IdPs, a genuinely useful discovery route into `host.dns.names`
+  or certificate names. Use them to *find* the product; never add them to the
+  total.
+
 **Corroboration must be causally INDEPENDENT of what it corroborates, and
 "0 hosts outside" is the signature of circularity, not of agreement.** Censys
 builds many tags by matching exactly the artifacts you would reach for as
