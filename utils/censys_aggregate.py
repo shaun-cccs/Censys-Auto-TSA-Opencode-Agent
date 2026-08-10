@@ -50,6 +50,7 @@ from censys_query import (
     DEFAULT_MAX_PER_MINUTE,
     DEFAULT_MIN_INTERVAL,
     DEFAULT_STATE_FILE,
+    DEFAULT_TIMEOUT_MS,
     RETRYABLE_STATUS,
     CreditCeilingError,
     RateLimitError,
@@ -223,7 +224,11 @@ def run_aggregate(
 ) -> Dict[str, Any]:
     """Aggregate a single field for a query."""
     token = token or get_personal_access_token()
-    with SDK(organization_id=get_org_id(org_id), personal_access_token=token) as sdk:
+    with SDK(
+        organization_id=get_org_id(org_id),
+        personal_access_token=token,
+        timeout_ms=DEFAULT_TIMEOUT_MS,
+    ) as sdk:
         response, error = censys_aggregate(
             sdk,
             field,
@@ -259,7 +264,11 @@ def run_multi_aggregate(
     token = get_personal_access_token()
     results: List[Dict[str, Any]] = []
 
-    with SDK(organization_id=get_org_id(org_id), personal_access_token=token) as sdk:
+    with SDK(
+        organization_id=get_org_id(org_id),
+        personal_access_token=token,
+        timeout_ms=DEFAULT_TIMEOUT_MS,
+    ) as sdk:
         for fld in fields:
             response, error = censys_aggregate(
                 sdk,

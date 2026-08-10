@@ -39,6 +39,20 @@ DEFAULT_MIN_INTERVAL = float(os.environ.get("CENSYS_MIN_INTERVAL", 1.0))
 DEFAULT_MAX_PER_MINUTE = int(os.environ.get("CENSYS_MAX_PER_MINUTE", 20))
 DEFAULT_BUDGET_REQUESTS = int(os.environ.get("CENSYS_BUDGET_REQUESTS", 200))
 DEFAULT_BUDGET_WINDOW = float(os.environ.get("CENSYS_BUDGET_WINDOW", 3600))
+
+# Per-request HTTP timeout, in milliseconds, passed to the SDK.
+#
+# This must be set explicitly. Without it the SDK's own default governs, and a
+# heavy regex query that the Censys backend never finishes will hold the socket
+# open for far longer than any interactive workflow can tolerate - then be
+# retried, with backoff, three more times. Measured in practice: single queries
+# consuming 130s of wall time inside a fingerprinting run.
+#
+# The ceiling interacts with the retry loop in fetch_page(): worst-case wall
+# time for one logical query is roughly max_retries * timeout plus the backoff
+# sum, so keep it well under the patience of a human watching a TSA run. 60s x 4
+# attempts + 7s backoff is already about four minutes.
+DEFAULT_TIMEOUT_MS = int(os.environ.get("CENSYS_TIMEOUT_MS", 60_000))
 DEFAULT_STATE_FILE = Path(
     os.environ.get(
         "CENSYS_RATE_STATE_FILE",
@@ -347,6 +361,13 @@ def censys_search_page(
 
     for attempt in range(max_retries):
         try:
+            # Charged per attempt, not per logical query, and that is deliberate.
+            # A retried attempt issues a real HTTP request, and a read timeout in
+            # particular means Censys most likely did execute the query and will
+            # bill for it - so counting only the successful attempt would
+            # under-report spend, which is the one direction a circuit breaker
+            # must never err in. The cost of a slow query is therefore bounded by
+            # DEFAULT_TIMEOUT_MS and max_retries, not by this ledger.
             charge_credits(estimate_query_cost(query), query)
             gateway.acquire()
             res = sdk.global_data.search(search_query_input_body=body)
@@ -393,7 +414,11 @@ def run_query(
     pages = 0
     errors: List[str] = []
 
-    with SDK(organization_id=get_org_id(org_id), personal_access_token=token) as sdk:
+    with SDK(
+        organization_id=get_org_id(org_id),
+        personal_access_token=token,
+        timeout_ms=DEFAULT_TIMEOUT_MS,
+    ) as sdk:
         while len(hits) < max_results:
             remaining = max_results - len(hits)
             response, error = censys_search_page(

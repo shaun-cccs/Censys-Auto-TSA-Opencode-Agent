@@ -35,6 +35,7 @@ from censys_platform import SDK, models
 
 from censys_query import (
     CENSYS_ORG_ID,
+    DEFAULT_TIMEOUT_MS,
     get_org_id,
     RETRYABLE_STATUS,
     get_personal_access_token,
@@ -87,6 +88,7 @@ def _sdk(org_id: str, token: Optional[str] = None) -> Iterator[SDK]:
     with SDK(
         organization_id=get_org_id(org_id),
         personal_access_token=token or get_personal_access_token(),
+        timeout_ms=DEFAULT_TIMEOUT_MS,
     ) as sdk:
         yield sdk
 
