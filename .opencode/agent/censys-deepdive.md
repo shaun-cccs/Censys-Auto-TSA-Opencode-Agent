@@ -124,8 +124,17 @@ Your brief begins with a `MODE:` line. There are two, and they end differently.
 
 | MODE | Your job | Cap |
 | --- | --- | --- |
-| `family` | Hunt **one signal family** - favicon+title, cert+JARM, path+header, redirect+SSO, or release artifacts. Harvest, test with `tsa candidates`, return the survivors. **You do not build the widened query and you do not run `tsa assess`** - the orchestrator unions every family's survivors and counts once. | 20 calls |
+| `family` | Hunt **one signal family** - structured protocol + service-scanner fields, favicon+title, cert+JARM, path+header, redirect+SSO, or release artifacts. Harvest, test with `tsa candidates`, return the survivors. **You do not build the widened query and you do not run `tsa assess`** - the orchestrator unions every family's survivors and counts once. | 20 calls |
 | `full` | The whole of 8a-8e yourself, including the union, the validation and the widened `tsa assess`. For a hunt small enough for one worker. | 30 calls |
+
+**If your family is `structured protocol + service-scanner fields`, start with
+`tsa agg host.services.protocol '<base query>' --count-hosts`, then read the
+sub-document behind every protocol it names with `tsa doc host --grep
+<protocol>`.** Censys stores parsed fields for the protocols it decodes -
+`any_connect.groups`, `ike.*` and their siblings - and those beat every regex the
+other five families can write, because a parsed field cannot be echoed by a host
+that merely mentions the string. This is also the family that survives honeypot
+contamination best. A port aggregation is **not** this check.
 
 You are usually one of several family workers running concurrently. **Stay in your
 family**: testing another worker's signals duplicates their spend and produces two

@@ -169,11 +169,17 @@ answer; a confident wrong number is not.
    tsa probe '<1-2 word seed>'
    ```
 
-   That is step 1's whole sweep - the host-scoped seed sample plus `product` in
-   all three tag trees - in one call. Derive 2-4 leads from it, then invoke **one
-   `@censys-fingerprint` per lead, all in a single message** so they run
-   concurrently. Four workers is the default, six the ceiling, three waves the
-   limit.
+   That is step 1's whole sweep - the host-scoped seed sample, `product` in all
+   three tag trees, and the decoded-protocol bucket - in one call. Derive 2-4
+   leads from it, then invoke **one `@censys-fingerprint` per lead, all in a
+   single message** so they run concurrently. Four workers is the default, six the
+   ceiling, three waves the limit.
+
+   **A lead returned independently by three or more workers is a directive, not a
+   note.** Workers share no context, so convergence means three independent
+   searches found the same gap: run it in the next wave, or record in `rationale`
+   why you overrode it. This outranks the usual test of whether a lead can still
+   change the base query.
 
    **Your task prompt to each MUST begin with the line `NON-INTERACTIVE MODE.`**
    and must carry `MODE: lead` (or `recon`), the lead as a hypothesis with its
@@ -213,11 +219,19 @@ answer; a confident wrong number is not.
 
 6. If `deepDive` is `always`, run the hunt: **one `@censys-deepdive` per signal
    family, all in a single message**, each with `MODE: family`, the validated base
-   query, the step 4 counts and a 20-call cap. The families are favicon+title,
-   cert+JARM, path+header, redirect+SSO, and release artifacts. Union their
-   surviving signals onto the intact original yourself, validate it, re-run
-   `tsa assess` on it, and assemble the `deep_dive` fragment. For a small hunt,
-   one worker with `MODE: full` may do 8a-8e and return the fragment whole.
+   query, the step 4 counts and a 20-call cap. The families are structured
+   protocol + service-scanner fields (`host.services.protocol` and its
+   sub-document), favicon+title, cert+JARM, path+header, redirect+SSO, and
+   release artifacts. **That list is a starting set, not a partition of signal
+   space** - five of the six read HTTP/TLS/cert evidence, so a fan-out built only
+   from them is blind the same way six times. Put the protocol family first for
+   any non-HTTP product (VPN, database, industrial, mail, remote access), and add
+   a family on an evidence layer the list omits when the target warrants it.
+   Union their surviving signals onto the intact original yourself, validate it,
+   re-run `tsa assess` on it, and assemble the `deep_dive` fragment. Do **not**
+   read "every family exhausted" as "the hunt is finished" - that is a statement
+   about your decomposition, not the product. For a small hunt, one worker with
+   `MODE: full` may do 8a-8e and return the fragment whole.
 
    If `deepDive` is `never` or `after`, skip it - there is no user to ask, so
    `after` means skip here - and record the floor caveat.

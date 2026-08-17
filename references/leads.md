@@ -50,6 +50,12 @@ nothing else in flight, so a `sleep` is pure dead time. If a worker comes back
 without its `STATUS:` line, treat it as partial and move on - do not re-invoke it
 hoping for more.
 
+**A lead returned independently by 3+ workers is a directive, not a note.**
+Workers share no context, so convergence is not imitation - it is three
+independent searches pointing at the same gap. Run it in the next wave, or record
+why you overrode it. This is the one case that outranks "don't spawn a wave for a
+lead that cannot change the base query".
+
 **A worker ends its message with a status line, always:**
 
 ```
@@ -101,6 +107,18 @@ hosts, and any leads it did not pursue. The orchestrator owns every decision:
 - **new leads** - queue them for the next wave, deduplicated against everything
   already run. **Do not spawn a wave for a lead whose answer cannot change the
   base query** - that is where fan-out stops paying
+- **a lead returned independently by three or more workers is a directive, not a
+  note.** Workers share no context, so convergence cannot be imitation: it means
+  three independent searches all pointed at the same gap, and that is the
+  strongest routing signal a fan-out can produce. Either run it in the next wave
+  or write into `rationale.findings` why you overrode it. Merging such a lead into
+  your notes and proceeding to the report is the specific failure this rule
+  exists to prevent - it happened on a Cisco ASA/FTD hunt where three of five
+  workers independently flagged the VPN control plane as the unexplored layer,
+  the orchestrator recorded all three and published anyway, and the signal it
+  pointed at was worth 1,661 missing hosts.
+  This overrides the "cannot change the base query" test above: three workers
+  agreeing is itself evidence that it can.
 
 Distributing the work does **not** distribute the judgement. The rules that need
 the whole picture - measure contamination before gating, prefer a coherent signal

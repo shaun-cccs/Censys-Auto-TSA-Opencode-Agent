@@ -369,15 +369,30 @@ class ProbePlan(unittest.TestCase):
     def test_covers_all_three_tag_trees(self):
         """Second principle: checking one tree is how "untagged" goes wrong."""
         fields = {item["field"] for item in self.plan() if item["op"] == "agg"}
-        self.assertEqual(fields, set(censys_batch.PROBE_TREES))
+        self.assertEqual(
+            fields, set(censys_batch.PROBE_TREES) | set(censys_batch.PROBE_PROTOCOL)
+        )
         self.assertIn("host.services.hardware.product", fields)
 
-    def test_is_four_calls(self):
-        self.assertEqual(len(self.plan()), 4)
+    def test_covers_the_decoded_protocol_layer(self):
+        """Tagging and HTTP content are not the only evidence layers.
+
+        A decoded protocol carries a structured sub-document (`any_connect.*`,
+        `ike.*`) that outranks any banner or body regex. Measured cost of
+        omitting it: an ASA/FTD run missed 1,661 hosts that
+        `any_connect.groups="DefaultWEBVPNGroup"` alone would have found, most of
+        them untagged in all three trees. A port aggregation is not this check,
+        so the field must be `protocol`, not `port`.
+        """
+        fields = {item["field"] for item in self.plan() if item["op"] == "agg"}
+        self.assertIn("host.services.protocol", fields)
+
+    def test_is_five_calls(self):
+        self.assertEqual(len(self.plan()), 5)
 
     def test_wide_adds_the_step_three_fields(self):
         items = self.plan(wide=True)
-        self.assertEqual(len(items), 4 + len(censys_batch.PROBE_WIDE))
+        self.assertEqual(len(items), 5 + len(censys_batch.PROBE_WIDE))
 
     def test_the_sample_is_host_scoped(self):
         """A bare full-text seed also matches web properties and certificates."""

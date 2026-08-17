@@ -114,7 +114,7 @@ Everything the agents use is available to you directly:
 | `tsa assess <query>` | global + country counts for a base query | 2 |
 | `tsa search <query>` | rate-limited host search, for validating a query | 1 |
 | `tsa agg <field> <query>` | bucket a field across a query - the fingerprint tool | 1 |
-| `tsa probe <seed>` | the whole first-pass sweep in one call: seed sample plus all three tag trees | 4 |
+| `tsa probe <seed>` | the whole first-pass sweep in one call: seed sample, all three tag trees, decoded protocols | 5 |
 | `tsa candidates <base> <c>...` | per candidate signal, the hosts it adds over the base and what they look like | 1 + 2 each |
 | `tsa batch --count/--sample/--agg` | any set of independent calls, run together | 1 each |
 | `tsa cve <CVE-ID>` | fetch a CVE record from cve.org, falling back to NVD | 0 |

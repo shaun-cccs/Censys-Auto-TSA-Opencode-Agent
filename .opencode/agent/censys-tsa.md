@@ -223,7 +223,11 @@ the full protocol; the rules that bind you are:
    actually needs, principles six and seven, and the `CAPABILITIES:` line.
 4. **Merge.** You own every decision - the workers report numbers, examples and
    verdicts. Spawn a refinement wave only for leads whose answer can still change
-   the base query, and stop at **three waves**.
+   the base query, and stop at **three waves**. **A lead returned independently by
+   three or more workers is a directive, not a note**: they share no context, so
+   convergence means three independent searches found the same gap. Run it in the
+   next wave or state in `rationale` why you overrode it - this outranks the
+   "cannot change the base query" test.
 
 If the target is a bare product with obvious tagging, one `MODE: recon` worker
 may be all you need - do not fan out for the sake of it. If a worker returns
@@ -313,17 +317,40 @@ When it runs, fan the hunt out the same way discovery was: **one
 structurally different and independent, which is exactly what makes them
 parallelisable:
 
+- structured protocol + service-scanner fields (`host.services.protocol` and the
+  sub-document behind it - `any_connect.*`, `ike.*`, ...)
 - favicon + HTML title
 - certificate subject + JARM
 - URI path + custom header + cookie name
 - redirect chain + SSO fronting (the population every content signal misses)
 - release-specific artifacts, when a version is in scope
 
+**That list is a starting set, not a partition of signal space.** Five of the six
+read HTTP, TLS or certificate evidence, so a fan-out built from them alone is
+blind in the same direction six times over - which is exactly how a run missed
+`host.services.protocol="ANYCONNECT"` and the 1,661 hosts its
+`any_connect.groups` field would have added. Before spawning, name the evidence
+**layers** this product could be visible in - decoded protocol, tag trees, TLS,
+HTTP content, DNS/WHOIS, routing - and check that your families cover more than
+one. Add a family the list does not have when the target warrants it, and say in
+`rationale` which layers you searched and which you did not.
+
+Put the protocol family first when the target speaks any non-HTTP protocol - VPN,
+database, industrial, mail, remote access. A structured decoded field beats every
+content regex in the other five families and is the one signal class honeypots
+mostly fail to fake.
+
 Give each worker `MODE: family`, its family, the validated base query, the step 6
 counts, and a cap of 20 Censys calls. They return validated signals with
 incremental counts; **you** do 8c-8e - `or` the survivors onto the intact
 original, validate it, re-run `tsa assess`, and compute the delta. Assemble the
 `deep_dive` fragment from the merged result.
+
+**Do not read "every family exhausted" as "the hunt is finished."** Workers report
+exhaustion of *their own* family, which is a statement about your decomposition
+and not about the product. When every worker comes back exhausted and a known gap
+is still open, the decomposition was wrong - add a family on a different evidence
+layer rather than closing the hunt.
 
 For a small or simple hunt, one worker with `MODE: full` does 8a-8e itself and
 returns the whole fragment. Choose that when the baseline is tiny or the product

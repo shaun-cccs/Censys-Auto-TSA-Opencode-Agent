@@ -16,9 +16,12 @@ Three entrypoints, all the same engine:
     An arbitrary set of counts, samples and aggregations. The general primitive.
 
 ``probe``
-    Step 1 in a single call: the full-text seed sample plus the product bucket
-    in **all three** tag trees - software, hardware, operating_system. That
-    sweep is mandatory (second principle) and used to cost four turns.
+    Step 1 in a single call: the full-text seed sample, the product bucket in
+    **all three** tag trees - software, hardware, operating_system - and the
+    decoded-protocol bucket. The tag sweep is mandatory (second principle) and
+    used to cost four turns; the protocol bucket is mandatory because tagging
+    and HTTP content are not the only evidence layers, and a structured protocol
+    document outranks any banner regex.
 
 ``candidates``
     Step 8b in a single call: for each candidate signal, how many hosts it adds
@@ -87,6 +90,29 @@ PROBE_TREES = (
     "host.services.hardware.product",
     "host.operating_system.product",
 )
+
+#  The fourth layer, and it is not a tag tree: what protocol did Censys actually
+#  DECODE on these services?
+#
+#  Tagging and HTTP content are two layers, not all of them. Censys decodes a
+#  set of named service protocols and stores a structured sub-document for each
+#  - `any_connect`, `ike`, `kubernetes`, `mysql` and so on - and those documents
+#  are better evidence than any banner regex, because they are parsed fields
+#  rather than strings that anything may echo.
+#
+#  Measured, and the reason this is now mandatory: an ASA/FTD assessment ran
+#  four fingerprint workers and five deep-dive workers over the three tag trees
+#  and every HTTP/TLS content family, and every one of them missed
+#  `host.services.protocol="ANYCONNECT"` with its `any_connect.groups` field.
+#  The default tunnel-group name `DefaultWEBVPNGroup` alone identified 1,661
+#  exposed Cisco VPN head-ends that carried no OS tag at all - roughly 1,500 of
+#  them untagged in all three trees. Aggregating ports is not the same check:
+#  the run did aggregate 443 and UDP 500 and still learned nothing, because a
+#  port number is not a decoded protocol.
+#
+#  One credit, always on. The failure it prevents is concluding "not tagged, and
+#  no content signal either" while a structured protocol document sits unread.
+PROBE_PROTOCOL = ("host.services.protocol",)
 
 #  --wide: the fields worth having when the tag trees come back empty and step 3
 #  is where this is heading anyway. Vendors first, because step 2 needs the
@@ -414,7 +440,13 @@ def format_probe(result: Dict[str, Any], seed: str, top: int = 12) -> str:
     lines.append(
         "Read all three trees before concluding anything: a bucket naming the target\n"
         "in ANY tree means tagging exists (step 2). Appliances live in `hardware`.\n"
-        "Bucket counts are occurrences at the deepest level unless --count-hosts."
+        "Bucket counts are occurrences at the deepest level unless --count-hosts.\n"
+        "\n"
+        "`host.services.protocol` is a FOURTH layer, not a tag tree. A named protocol\n"
+        "here means Censys decoded it and stored a structured sub-document you can\n"
+        "query - `any_connect.groups`, `ike.*` and so on - which beats any banner or\n"
+        "body regex. Check it with `tsa doc host --grep <protocol>` before writing\n"
+        "content patterns, and never treat a port aggregation as this check."
     )
     return "\n".join(lines)
 
@@ -515,7 +547,9 @@ def load_plan(path: str) -> List[Dict[str, Any]]:
 
 
 def build_probe_items(args: argparse.Namespace) -> List[Dict[str, Any]]:
-    fields = list(PROBE_TREES) + (list(PROBE_WIDE) if args.wide else [])
+    fields = list(PROBE_TREES) + list(PROBE_PROTOCOL) + (
+        list(PROBE_WIDE) if args.wide else []
+    )
     sample_query = args.seed if args.raw_seed else host_scoped(args.seed)
     items = [
         make_item("sample", sample_query, max_results=args.max_results, label="seed sample")

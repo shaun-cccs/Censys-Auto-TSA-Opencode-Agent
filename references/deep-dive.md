@@ -28,6 +28,14 @@ Owned by the `censys-deepdive` subagent.
 `tsa agg --suggest-fields '<base query>' -k 20`, then targeted favicon, title,
 JARM and certificate aggregations - batched, not one per turn.
 
+**8a-0. Before any of that, aggregate `host.services.protocol`.** Every other
+signal in this reference is HTTP, TLS or certificate evidence. A decoded protocol
+is a different evidence *layer*, and its structured sub-document
+(`any_connect.groups`, `ike.*`, ...) beats any regex here because a parsed field
+cannot be echoed by a host that merely mentions the string. Read the
+sub-document with `tsa doc host --grep <protocol>`. **Aggregating ports is not
+this check.**
+
 **8a-bis. Hunt a unique identifier string.** Ranked best first:
 
 1. a **self-identifying support or doc link** - the appliance names its own
@@ -135,6 +143,25 @@ tsa agg host.services.endpoints.http.html_title \
   '<base query>' -k 20
 tsa agg host.services.jarm.fingerprint '<base query>' -k 10
 ```
+
+**And the one that is not HTTP at all - do this first:**
+
+```bash
+tsa agg host.services.protocol '<base query>' --count-hosts -k 20
+tsa doc host --grep any_connect     # read whatever protocol that named
+```
+
+**Worked failure - Cisco ASA/FTD.** A hunt ran five family workers over favicon,
+title, certificate, JARM, path, header, cookie, redirect and release evidence.
+Four of the five reported their family "exhausted"; three independently returned
+"UDP 500 / IKE as a structural gate" as their top unexplored lead. Every one of
+them missed `host.services.protocol="ANYCONNECT"`, whose `any_connect.groups`
+field holds the ASA default tunnel-group name `DefaultWEBVPNGroup` - by itself
+worth **+1,661 hosts** the published query lacked, roughly 1,500 of them untagged
+in all three trees and invisible to every content signal in this file. The port
+aggregations the workers *did* run (443, UDP 500) found nothing, because a port
+number is not a decoded protocol. Two lessons: check the protocol layer before the
+content layers, and treat unanimous convergence in worker leads as a directive.
 
 **8a-bis. Hunt for a unique identifier string - the highest-value signal.**
 Aggregations only surface values Censys already buckets. The strongest widening

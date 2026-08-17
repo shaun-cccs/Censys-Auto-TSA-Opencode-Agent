@@ -330,10 +330,98 @@ class BatchingIsMandatory(unittest.TestCase):
                 self.assertIn("tsa batch", body(agent))
 
     def test_the_references_teach_the_batched_form_first(self):
-        self.assertRegex(flat(reference("fingerprinting")), r"(?i)one call, not four")
+        #  "not five" tracks the probe's call count: seed sample, three tag
+        #  trees, and the decoded-protocol bucket.
+        self.assertRegex(flat(reference("fingerprinting")), r"(?i)one call, not five")
         self.assertRegex(
             flat(reference("deep-dive")), r"(?i)test every candidate in one call"
         )
+
+
+class EvidenceLayersAreNotJustHttp(unittest.TestCase):
+    """The deep-dive family list must not be a partition of HTTP evidence only.
+
+    Measured failure this guards: an ASA/FTD hunt spawned five family workers
+    covering favicon, title, certificate, JARM, path, header, cookie, redirect
+    and release evidence. Five of five are HTTP/TLS/certificate layers, so the
+    fan-out was blind in the same direction five times and every worker missed
+    `host.services.protocol="ANYCONNECT"` - whose `any_connect.groups` field was
+    worth 1,661 hosts the published query did not have, ~1,500 of them untagged
+    in all three trees. Breadth of families is not breadth of *layers*.
+    """
+
+    def test_both_orchestrators_offer_the_protocol_family(self):
+        for agent in ORCHESTRATORS:
+            with self.subTest(agent=agent):
+                self.assertRegex(
+                    flat(body(agent)),
+                    r"(?i)structured protocol",
+                    f"{agent} does not name the structured-protocol signal family",
+                )
+
+    def test_both_orchestrators_say_the_family_list_is_not_exhaustive(self):
+        for agent in ORCHESTRATORS:
+            with self.subTest(agent=agent):
+                self.assertRegex(
+                    flat(body(agent)),
+                    r"(?i)starting set, not a partition of signal space",
+                    f"{agent} presents the family list as complete",
+                )
+
+    def test_the_deepdive_worker_knows_the_family(self):
+        self.assertRegex(flat(body("censys-deepdive")), r"(?i)host\.services\.protocol")
+
+    def test_the_deep_dive_reference_puts_the_protocol_layer_before_content(self):
+        text = flat(reference("deep-dive"))
+        self.assertRegex(text, r"(?i)host\.services\.protocol")
+        self.assertRegex(
+            text,
+            #  One leading (?i) only: Python 3.12 rejects a global flag that is
+            #  not at the start of the pattern, which is the same trap CenQL has.
+            #  Bold markers are left out so the assertion survives re-wording.
+            r"(?i)(aggregating ports|a port aggregation) is not this check",
+            "the reference does not warn that ports are not protocols",
+        )
+
+    def test_the_probe_covers_the_protocol_layer(self):
+        """Step 1's own sweep, so no worker has to remember to ask."""
+        self.assertRegex(flat(reference("fingerprinting")), r"(?i)host\.services\.protocol")
+
+
+class ConvergentLeadsAreADirective(unittest.TestCase):
+    """Three independent workers naming the same lead is the strongest routing
+    signal a fan-out produces, because workers share no context.
+
+    Measured failure this guards: on the ASA/FTD hunt, three of five deep-dive
+    workers independently returned "the VPN control plane / IKE" as their top
+    unexplored lead. The orchestrator merged all three into its notes, judged
+    that no lead could still change the base query, and published. The layer they
+    pointed at held 1,661 missing hosts.
+    """
+
+    def test_the_reference_states_the_rule(self):
+        text = flat(reference("leads"))
+        self.assertRegex(
+            text,
+            r"(?i)(three or more|3\+) workers is a directive",
+            "leads.md does not make convergent leads a directive",
+        )
+
+    def test_it_outranks_the_cannot_change_the_query_test(self):
+        """Otherwise the older rule silently wins, which is what happened."""
+        self.assertRegex(
+            flat(reference("leads")),
+            r"(?i)outranks|overrides",
+        )
+
+    def test_both_orchestrators_carry_it(self):
+        for agent in ORCHESTRATORS:
+            with self.subTest(agent=agent):
+                self.assertRegex(
+                    flat(body(agent)),
+                    r"(?i)(three or more|3\+) workers is a directive, not a note",
+                    f"{agent} may drop a lead three workers agreed on",
+                )
 
 
 if __name__ == "__main__":

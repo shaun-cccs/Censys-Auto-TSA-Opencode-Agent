@@ -14,7 +14,7 @@ relative to where the user is working.
 
 | Command | For | Cost |
 | --- | --- | --- |
-| `tsa probe <seed>` | step 1 in one call: seed sample + all three tag trees | 4 (9 `--wide`) |
+| `tsa probe <seed>` | step 1 in one call: seed sample + all three tag trees + decoded protocols | 5 (10 `--wide`) |
 | `tsa candidates <base> <cand>...` | step 8b in one call: increment + titles per candidate | 1 + 2 each |
 | `tsa batch --count/--sample/--agg ...` | any independent calls, run together | 1 each |
 | `tsa agg <field> <query>` | one bucket list. `--count-hosts` for host counts | 1 |
@@ -57,7 +57,7 @@ script, a reference or a doc, and never `cd` anywhere.
 | `tsa assess` | TSA driver. Base host query and/or CVE in, platform query + global + country counts + credits out. 2 credits. |
 | `tsa agg` | Bucket a field across a query. The main fingerprint-discovery tool. Pass `--count-hosts` for host counts - the default counts nested occurrences. 1 credit per call. |
 | `tsa search` | Rate-limited Censys Platform search client. Validation and pivots. 1 credit. |
-| `tsa probe` | **Step 1 in one call**: the seed sample plus the product bucket in all three tag trees, concurrently. 4 credits (9 with `--wide`). |
+| `tsa probe` | **Step 1 in one call**: the seed sample, the product bucket in all three tag trees, and the `host.services.protocol` bucket, concurrently. 5 credits (10 with `--wide`). |
 | `tsa candidates` | **Step 8b in one call**: how many hosts each candidate signal adds over the base query, and what those hosts' titles are. 1 + 2 per candidate. |
 | `tsa batch` | Any set of independent counts, samples and aggregations, run together. 1 credit each. |
 | `tsa cve` | Retrieve a CVE record from cve.org, falling back to NVD. Context only, no parsing. Free. |

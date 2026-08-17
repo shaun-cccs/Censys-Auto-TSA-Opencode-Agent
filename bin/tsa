@@ -264,8 +264,9 @@ Censys queries (need uv + the censys-platform SDK, cost credits):
   tsa agg <field> <query> [-k N] [--count-hosts] [--compare-levels]
                           Bucket a field across a query. The fingerprint tool. 1 credit.
   tsa probe <seed> [--wide]
-                          Step 1 in ONE call: full-text sample plus the product
-                          bucket in all three tag trees. 4 credits (9 with --wide).
+                          Step 1 in ONE call: full-text sample, the product
+                          bucket in all three tag trees, and the decoded
+                          protocol bucket. 5 credits (10 with --wide).
   tsa candidates <base> <cand>... [--totals]
                           Step 8b in ONE call: incremental hosts each candidate
                           adds over the base, with the titles of those hosts.
