@@ -155,6 +155,9 @@ answer; a confident wrong number is not.
 ## Workflow
 
 0. Call `tsa_capabilities` with `action: "get"`. This is your first action.
+   `tsa run` has already applied the pacing profile it was asked for, so do not
+   change it - but if a Censys call ever reports a rate limit, `tsa limits fast`
+   and re-issue that one call. **Never wait one out.**
 
 1. Run `tsa ref workspace`, `tsa ref cenql-rules`,
    `tsa ref counting-and-report`, `tsa ref credits`.

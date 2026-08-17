@@ -251,6 +251,9 @@ Censys queries (need uv + the censys-platform SDK, cost credits):
   tsa budget              Session credit ledger state. Free.
 
 Offline (standard library only, no uv, no credits):
+  tsa limits [none|fast|standard|clear]
+                          How fast this machine may issue Censys requests. No
+                          argument shows what is in force and where it came from.
   tsa timeline [--since S] [--all] [-f json]
                           Where a run's wall-clock time went: time inside Censys
                           versus idle gap. Read this before optimising anything.
@@ -301,6 +304,7 @@ case $command in
     credits) run_dep censys_credits.py "$@" ;;
     budget) run_dep censys_session_budget.py "$@" ;;
     timeline) run_stdlib censys_metrics.py "$@" ;;
+    limits) run_stdlib censys_limits.py "$@" ;;
     cve) run_stdlib cve_lookup.py "$@" ;;
     report) run_stdlib tsa_report.py "$@" ;;
     run) run_stdlib tsa_run.py "$@" ;;

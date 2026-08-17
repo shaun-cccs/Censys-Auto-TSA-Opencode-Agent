@@ -118,27 +118,50 @@ Reports are written to `./reports/` **relative to the directory the user is
 working in**, and that is the only place this workflow writes. Never write
 outside it, and never write into the kit's own installation.
 
-## Rate limits
+## Rate limits - a session decision, and never a reason to wait
 
-`tsa search` enforces a min interval, a per-minute cap, and a rolling request
-budget persisted across runs. Every Censys subcommand shares it. On `request
-budget exhausted`, wait rather than raising the budget. Aggregations are cheap
-per request but `--suggest-fields` issues one request per field - use a targeted
-field list when the budget is tight. Keep validation queries at
-`--max-results 5`; TSA counts fetch one hit each and read `total_hits`.
-`tsa cve` does not touch Censys at all, so it is outside this budget entirely.
+Pacing is chosen once per run and persisted, so every subcommand in every
+subagent obeys the same profile:
 
-**Read the budget with `tsa budget`, and never by opening the state file.** The
-ledger lives outside any workspace, so reading it directly trips an
+| Profile | Pacing | Use it when |
+| --- | --- | --- |
+| `none` | none at all | you want the assessment to finish; credits are still capped |
+| `fast` | 120/min, 5000/hour, no interval | the default if nobody chooses - bounded, never in the way |
+| `standard` | 1s interval, 20/min, 200/hour | reproducing an old run, or deliberately crawling |
+
+```bash
+tsa limits          # what is in force, and where each number came from
+tsa limits none     # apply a profile - do this once, right after step -1
+```
+
+**`standard` is below what one assessment needs.** A real run issues 100-300
+Censys actions; a 200-per-hour rolling budget therefore runs out partway through
+its own work. That is why it is not the default any more.
+
+**Never sleep, never poll, never wait out a limit.** A rate-limit error is a
+*result*: report it and move on, or raise the profile with `tsa limits fast` and
+re-issue the one call. Waiting is how a fifteen-minute assessment became an hour
+- there is nothing happening in the background that a wait would let finish, and
+a `sleep` in a subagent is pure dead time.
+
+**Pacing is not a spend limit.** Credits are capped separately and measured
+independently: `tsa budget` for the session ledger, `tsa credits` for the real
+org balance. Turning pacing off does not raise what a run may spend.
+
+Read the budget with `tsa budget`, and never by opening the state file. Those
+files live outside any workspace, so reading one directly trips an
 `external_directory` permission prompt - which, raised inside a subagent, has no
-UI to answer it and hangs the run indefinitely. `tsa budget` reports the same
-state and costs nothing. The same applies to the credit ledger: use
-`tsa credits`.
+UI to answer it and hangs the run indefinitely. `tsa budget`, `tsa limits` and
+`tsa credits` report the same state and cost nothing.
 
-The budget is shared across subagents. A `censys-fingerprint` run that burns the
-budget will stall the `censys-deepdive` run that follows it in the same session.
-It is also shared across *concurrent* runs on the same machine, so a second TSA
-started in another session draws down the same allowance.
+The request budget - when a profile has one - is shared across subagents *and*
+across concurrent runs on the same machine, as is the pacing profile itself. A
+second TSA started elsewhere draws on the same allowance. `tsa cve` does not
+touch Censys at all, so it is outside this entirely.
+
+Keep validation searches at `--max-results 5`; TSA counts fetch one hit each and
+read `total_hits`. `tsa agg --suggest-fields` issues one request per field, but
+issues them concurrently.
 
 ## Credentials
 

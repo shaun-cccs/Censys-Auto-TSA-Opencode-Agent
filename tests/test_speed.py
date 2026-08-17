@@ -22,6 +22,7 @@ import argparse
 import contextlib
 import io
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -30,7 +31,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tests.helpers import censys_cost_simulator, load_util
+from tests.helpers import body, censys_cost_simulator, flat, load_util
 
 
 class Metrics(unittest.TestCase):
@@ -581,8 +582,255 @@ class BatchCostsAreMetered(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertGreater(self.cost(command), 1)
 
-    def test_timeline_is_free(self):
-        self.assertEqual(self.cost("tsa timeline --since 600"), 0)
+    def test_timeline_and_limits_are_free(self):
+        """Neither touches Censys, and pricing them would distort the breaker."""
+        for command in ["tsa timeline --since 600", "tsa limits none"]:
+            with self.subTest(command=command):
+                self.assertEqual(self.cost(command), 0)
+
+
+# ------------------------------------------------------------- rate-limit profiles
+
+
+class Profiles(unittest.TestCase):
+    """`tsa limits` - pacing as a session decision.
+
+    The shipped defaults paced every request by a second and capped the rolling
+    budget at 200/hour, while a real run issues 100-300 Censys actions. Every run
+    therefore stalled itself, and the prose told the agent to wait it out.
+    """
+
+    def setUp(self):
+        self.limits = load_util("censys_limits")
+        self.tmp = tempfile.TemporaryDirectory()
+        self.limits.LIMITS_FILE = Path(self.tmp.name) / "limits.json"
+        self._env = dict(os.environ)
+        for key in self.limits.ENV_KEYS.values():
+            os.environ.pop(key, None)
+
+    def tearDown(self):
+        os.environ.clear()
+        os.environ.update(self._env)
+        self.tmp.cleanup()
+
+    def test_the_three_profiles_exist_and_are_ordered_by_speed(self):
+        names = set(self.limits.PROFILES)
+        self.assertEqual(names, {"none", "fast", "standard"})
+        none, fast, standard = (self.limits.PROFILES[n] for n in ("none", "fast", "standard"))
+        self.assertEqual(none["max_per_minute"], 0, "'none' must not cap per minute")
+        self.assertEqual(none["budget_requests"], 0, "'none' must not have a budget")
+        self.assertGreater(fast["budget_requests"], standard["budget_requests"])
+        self.assertEqual(fast["min_interval"], 0.0)
+
+    def test_none_still_caps_concurrency(self):
+        """"No pacing" must not mean "unbounded sockets"."""
+        self.assertGreater(self.limits.PROFILES["none"]["concurrency"], 1)
+        self.assertLessEqual(self.limits.PROFILES["none"]["concurrency"], 32)
+
+    def test_the_fallback_is_not_the_profile_that_stalls_runs(self):
+        """Forgetting to choose must not reintroduce the original stall."""
+        self.assertEqual(self.limits.FALLBACK_PROFILE, "fast")
+        self.assertEqual(self.limits.profile_name(), "fast")
+        settings = self.limits.effective()
+        self.assertGreater(settings["budget_requests"], 300, "one run issues 100-300")
+
+    def test_standard_reproduces_the_original_numbers(self):
+        standard = self.limits.PROFILES["standard"]
+        self.assertEqual(standard["min_interval"], 1.0)
+        self.assertEqual(standard["max_per_minute"], 20)
+        self.assertEqual(standard["budget_requests"], 200)
+
+    def test_setting_a_profile_persists_it_for_other_processes(self):
+        self.limits.write_state("none", by="test")
+        self.assertEqual(self.limits.profile_name(), "none")
+        self.assertEqual(self.limits.effective()["max_per_minute"], 0)
+
+    def test_clearing_returns_to_the_fallback(self):
+        self.limits.write_state("standard")
+        self.limits.clear_state()
+        self.assertEqual(self.limits.profile_name(), self.limits.FALLBACK_PROFILE)
+
+    def test_an_unknown_profile_in_the_file_is_ignored(self):
+        self.limits.LIMITS_FILE.write_text(json.dumps({"profile": "ludicrous"}))
+        self.assertEqual(self.limits.profile_name(), self.limits.FALLBACK_PROFILE)
+
+    def test_a_corrupt_file_is_ignored_rather_than_fatal(self):
+        self.limits.LIMITS_FILE.write_text("{not json")
+        self.assertEqual(self.limits.profile_name(), self.limits.FALLBACK_PROFILE)
+
+    def test_environment_beats_the_profile(self):
+        self.limits.write_state("standard")
+        os.environ["CENSYS_MAX_PER_MINUTE"] = "77"
+        settings, provenance = self.limits.resolve()
+        self.assertEqual(settings["max_per_minute"], 77)
+        self.assertIn("env", provenance["max_per_minute"])
+        self.assertIn("profile", provenance["min_interval"])
+
+    def test_a_junk_environment_value_falls_back_instead_of_crashing(self):
+        os.environ["CENSYS_MAX_PER_MINUTE"] = "quickly"
+        self.assertEqual(
+            self.limits.effective()["max_per_minute"],
+            self.limits.PROFILES[self.limits.FALLBACK_PROFILE]["max_per_minute"],
+        )
+
+    def test_status_says_what_is_in_force_and_why(self):
+        self.limits.write_state("none", by="censys-tsa")
+        text = self.limits.format_status()
+        self.assertIn("none", text)
+        self.assertIn("censys-tsa", text)
+        self.assertIn("not a spend limit", text)
+
+    def test_json_status_is_machine_readable(self):
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            self.assertEqual(self.limits.main(["fast", "-f", "json"]), 0)
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(payload["profile"], "fast")
+        self.assertIn("min_interval", payload["settings"])
+
+    def test_setting_a_profile_from_the_cli_persists_it(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.limits.main(["none"])
+        self.assertEqual(self.limits.profile_name(), "none")
+
+
+@unittest.skipIf(censys_batch is None, "censys-platform SDK not available")
+class ProfileDrivesTheTools(unittest.TestCase):
+    """The profile has to reach the code that paces, or it is decoration."""
+
+    def test_query_defaults_come_from_the_profile(self):
+        settings = censys_query.censys_limits.effective()
+        self.assertEqual(censys_query.DEFAULT_MIN_INTERVAL, settings["min_interval"])
+        self.assertEqual(censys_query.DEFAULT_MAX_PER_MINUTE, settings["max_per_minute"])
+        self.assertEqual(censys_query.DEFAULT_BUDGET_REQUESTS, settings["budget_requests"])
+        self.assertEqual(censys_query.DEFAULT_CONCURRENCY, max(1, settings["concurrency"]))
+
+    def test_nothing_hardcodes_the_old_pacing_defaults(self):
+        """The 1s/20/200 numbers must live in the profile table, nowhere else."""
+        source = (Path(__file__).resolve().parent.parent / "utils" / "censys_query.py").read_text()
+        self.assertNotIn('os.environ.get("CENSYS_MIN_INTERVAL"', source)
+        self.assertNotIn('os.environ.get("CENSYS_BUDGET_REQUESTS"', source)
+
+    def test_the_budget_error_tells_the_agent_not_to_wait(self):
+        """"Wait rather than raising the budget" is what made runs take an hour."""
+        gateway = censys_query.RateLimitGateway(
+            min_interval=0.0, max_per_minute=0, budget_requests=1, budget_window=3600,
+            state_file=None,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            gateway.state_file = Path(tmp) / "state.json"
+            gateway.acquire()
+            with self.assertRaises(censys_query.RateLimitError) as caught:
+                gateway.acquire()
+        message = str(caught.exception)
+        self.assertIn("Do NOT wait", message)
+        self.assertIn("tsa limits", message)
+
+
+class LedgersAreLocked(unittest.TestCase):
+    """Parallel subagents share these files; a lost update loses spend."""
+
+    def source(self) -> str:
+        return (Path(__file__).resolve().parent.parent / "utils" / "censys_query.py").read_text()
+
+    def test_a_lock_helper_exists_and_degrades_rather_than_failing(self):
+        text = self.source()
+        self.assertIn("def file_lock(", text)
+        self.assertIn("import fcntl", text)
+        self.assertRegex(text, r"except ImportError")
+
+    def test_both_read_modify_write_paths_take_the_lock(self):
+        text = self.source()
+        for function in ("def charge_credits(", "def _record_budget_use("):
+            with self.subTest(function=function):
+                start = text.index(function)
+                body = text[start:start + 1400]
+                self.assertIn("file_lock(", body, f"{function} is unlocked")
+
+
+class RateProfileIsACapability(unittest.TestCase):
+    """It is carried in the capability set, and honestly labelled as unenforced."""
+
+    def setUp(self):
+        self.source = (
+            Path(__file__).resolve().parent.parent
+            / ".opencode" / "plugin" / "tsa-capabilities.ts"
+        ).read_text()
+
+    def test_the_plugin_carries_the_choice(self):
+        self.assertIn("rateLimit", self.source)
+        self.assertRegex(self.source, r'case "rate":')
+
+    def test_the_plugin_default_matches_the_python_fallback(self):
+        limits = load_util("censys_limits")
+        self.assertRegex(self.source, rf'rateLimit: "{limits.FALLBACK_PROFILE}"')
+
+    def test_the_plugin_says_it_cannot_enforce_pacing(self):
+        """Pacing happens inside a Python process, not at the tool boundary."""
+        self.assertRegex(self.source, r"cannot enforce|cannot apply")
+        self.assertIn("tsa limits", self.source)
+
+    def test_pacing_is_not_gated_like_a_network_capability(self):
+        self.assertNotRegex(self.source, r'input\.tool === "\w+" && !caps\.rateLimit')
+
+
+class UnattendedRunsChooseTheirPacing(unittest.TestCase):
+    def setUp(self):
+        self.tsa_run = load_util("tsa_run")
+
+    def args(self, **overrides):
+        base = dict(
+            target="X", cve=None, product=None, allow_web=False,
+            allow_endpoint_check=False, deep_dive=False, budget=None,
+            version_breakdown=False, no_reports=False, print_spec=False, rate="fast",
+        )
+        base.update(overrides)
+        return argparse.Namespace(**base)
+
+    def test_the_capability_line_carries_the_rate(self):
+        self.assertIn("rate=none", self.tsa_run.build_capabilities(self.args(rate="none")))
+        self.assertIn("rate=fast", self.tsa_run.build_capabilities(self.args()))
+
+    def test_the_wrapper_applies_the_profile_itself(self):
+        """An unattended run has nobody to notice the agent skipped the step."""
+        with mock.patch.object(self.tsa_run.subprocess, "run") as run:
+            run.return_value = mock.Mock(returncode=0, stderr="", stdout="")
+            self.tsa_run.apply_rate_profile("none")
+        command = run.call_args[0][0]
+        self.assertIn("limits", command)
+        self.assertIn("none", command)
+
+    def test_a_failure_to_set_pacing_is_reported_not_fatal(self):
+        with mock.patch.object(self.tsa_run.subprocess, "run", side_effect=OSError("nope")):
+            message = self.tsa_run.apply_rate_profile("fast")
+        self.assertIn("could not set pacing", message)
+
+
+class AgentsAreToldNotToWait(unittest.TestCase):
+    """The instruction that cost the most: "wait rather than raising the budget"."""
+
+    def text(self, name: str) -> str:
+        return flat((Path(__file__).resolve().parent.parent / "references" / f"{name}.md").read_text())
+
+    def test_the_old_wait_instruction_is_gone(self):
+        self.assertNotIn("wait rather than raising the budget", self.text("workspace"))
+
+    def test_never_sleep_is_stated_explicitly(self):
+        workspace = self.text("workspace")
+        self.assertRegex(workspace, r"(?i)never sleep")
+        self.assertIn("tsa limits", workspace)
+
+    def test_the_profiles_are_documented_for_the_agents(self):
+        workspace = self.text("workspace")
+        for profile in ("none", "fast", "standard"):
+            with self.subTest(profile=profile):
+                self.assertIn(f"`{profile}`", workspace)
+
+    def test_the_interview_asks_about_pacing(self):
+        prompt = flat(body("censys-tsa"))
+        self.assertRegex(prompt, r"(?i)censys pacing")
+        self.assertIn("tsa limits", prompt)
+        self.assertRegex(prompt, r"(?i)no limits \(recommended\)")
 
 
 if __name__ == "__main__":

@@ -110,7 +110,7 @@ Skip the interview only if the opening prompt contains a `CAPABILITIES:` line
 preferences in plain language. In either case, register what they said and move
 on.
 
-Ask all five in a single `question` call:
+Ask all of these in a single `question` call:
 
 1. **Web research** - "May I use web research (vendor sites, advisories, source
    repos) if Censys alone can't identify the product?"
@@ -154,9 +154,27 @@ Ask all five in a single `question` call:
      1.123.1`, `CUPS 1.4`) or is a CVE - in both cases version work is the
      point of the assessment. Say which way you resolved it when you echo the
      capability set back.
+7. **Censys pacing** - "How fast may I issue Censys requests?"
+   - "No limits (Recommended)" -> `rateLimit: none`. Pacing off entirely. This is
+     a throughput knob, not a spend limit: credits are capped separately by
+     question 4 and measured independently.
+   - "Bounded, but out of the way" -> `rateLimit: fast`
+   - "Conservative pacing" -> `rateLimit: standard`. Honest warning if they pick
+     it: its rolling budget is 200 requests/hour and one assessment issues
+     100-300, so the run will stall partway through and you will have to raise it.
 
 Then call `tsa_capabilities` with `action: "set"` and the answers, and show the
 user the resolved capability set it returns before doing any work.
+
+**Immediately after registering, apply the pacing profile:**
+
+```bash
+tsa limits <none|fast|standard> --by censys-tsa
+```
+
+This is the one capability the plugin cannot enforce for you. Pacing lives inside
+the Python tools, which read it from a state file, so nothing takes effect until
+you run that command - and every subagent's calls depend on it.
 
 **If the `tsa_capabilities` tool does not exist, stop and tell the user to run
 `tsa doctor`.** That tool is provided by the capability plugin, which is also the

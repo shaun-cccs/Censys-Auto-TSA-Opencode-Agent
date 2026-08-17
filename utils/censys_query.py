@@ -16,6 +16,7 @@ Examples
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import sys
@@ -24,10 +25,16 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Deque, Dict, List, Optional, Tuple
+from typing import Any, Deque, Dict, Iterator, List, Optional, Tuple
+
+try:  # POSIX only, and optional: without it the locks below become no-ops.
+    import fcntl
+except ImportError:  # pragma: no cover - Windows
+    fcntl = None  # type: ignore[assignment]
 
 from censys_platform import SDK, models
 
+import censys_limits
 import censys_metrics
 
 # Organization ID for the Censys Platform tenant. No default: see get_org_id().
@@ -36,18 +43,27 @@ CENSYS_ORG_ID = os.environ.get("CENSYS_ORG_ID", "")
 # Censys caps page_size at 100.
 MAX_PAGE_SIZE = 100
 
-# Rate-limit defaults (overridable via CLI flags or environment variables).
-DEFAULT_MIN_INTERVAL = float(os.environ.get("CENSYS_MIN_INTERVAL", 1.0))
-DEFAULT_MAX_PER_MINUTE = int(os.environ.get("CENSYS_MAX_PER_MINUTE", 20))
-DEFAULT_BUDGET_REQUESTS = int(os.environ.get("CENSYS_BUDGET_REQUESTS", 200))
-DEFAULT_BUDGET_WINDOW = float(os.environ.get("CENSYS_BUDGET_WINDOW", 3600))
+# Rate-limit defaults come from the session's profile - `tsa limits` - with
+# environment variables layered on top. An explicit CLI flag then beats both,
+# for free: these values are the flags' defaults, so passing one overrides it.
+#
+# They are NOT hardcoded here any more, and that matters. The old defaults paced
+# every request by a second and capped the rolling budget at 200 per hour, which
+# is below what a single assessment issues - so a normal run stalled itself and
+# the workflow told the agent to wait. See censys_limits for the measurements.
+_LIMITS = censys_limits.effective()
+
+DEFAULT_MIN_INTERVAL = float(_LIMITS["min_interval"])
+DEFAULT_MAX_PER_MINUTE = int(_LIMITS["max_per_minute"])
+DEFAULT_BUDGET_REQUESTS = int(_LIMITS["budget_requests"])
+DEFAULT_BUDGET_WINDOW = float(_LIMITS["budget_window"])
 
 # How many Censys requests one process may have in flight. Only the batching
 # entrypoints use it; a single search or aggregation is one request either way.
 # It is a ceiling on sockets, not a promise of parallelism: the rate-limit
 # gateway holds its lock while it paces, so a profile with a min interval
 # serialises concurrent callers regardless of this number.
-DEFAULT_CONCURRENCY = max(1, int(os.environ.get("CENSYS_CONCURRENCY", 8)))
+DEFAULT_CONCURRENCY = max(1, int(_LIMITS["concurrency"]))
 
 # Per-request HTTP timeout, in milliseconds, passed to the SDK.
 #
@@ -133,6 +149,43 @@ def estimate_query_cost(query: str) -> int:
     return API_REQUEST_COST
 
 
+@contextlib.contextmanager
+def file_lock(path: Path) -> Iterator[None]:
+    """Serialise read-modify-write on a shared state file across processes.
+
+    Both ledgers here are read-modify-write, and they are shared by every
+    subagent and every concurrent run on the machine. That was tolerable while
+    one request happened at a time; with batching and parallel subagents it is a
+    lost-update race, and the value that gets lost is spend - the one direction a
+    circuit breaker must not err in.
+
+    The lock is a sibling ``.lock`` file rather than the data file itself,
+    because the data file is truncated and rewritten. Failing to lock is not
+    fatal: without fcntl, or without permission to create the lock, the caller
+    proceeds unlocked rather than losing the query.
+    """
+    if fcntl is None:
+        yield
+        return
+    handle = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(str(path) + ".lock", "w")
+        fcntl.flock(handle, fcntl.LOCK_EX)
+    except OSError:
+        if handle is not None:
+            handle.close()
+        yield
+        return
+    try:
+        yield
+    finally:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+        finally:
+            handle.close()
+
+
 def read_credit_ledger() -> Dict[str, Any]:
     """Return the persisted session credit ledger, or a fresh one."""
     try:
@@ -150,26 +203,29 @@ def charge_credits(cost: float, query: str = "") -> None:
     """Record estimated spend, refusing the charge past the ceiling.
 
     Raises ``CreditCeilingError`` *before* the request is issued so the ceiling
-    is a spend limit rather than an after-the-fact report.
+    is a spend limit rather than an after-the-fact report. Locked, because
+    parallel subagents charge the same ledger and an unlocked read-modify-write
+    silently loses charges.
     """
     if CREDIT_CEILING <= 0:
         return
-    ledger = read_credit_ledger()
-    projected = float(ledger["spent"]) + float(cost)
-    if projected > CREDIT_CEILING:
-        raise CreditCeilingError(
-            f"session credit ceiling reached: {ledger['spent']:.0f} spent, this "
-            f"request costs {cost:.0f}, ceiling is {CREDIT_CEILING:.0f}. "
-            f"Raise CENSYS_SESSION_CREDIT_CEILING to continue."
-        )
-    ledger["spent"] = projected
-    ledger["requests"] = int(ledger["requests"]) + 1
-    ledger["last_query"] = (query or "")[:200]
-    try:
-        CREDIT_LEDGER_FILE.parent.mkdir(parents=True, exist_ok=True)
-        CREDIT_LEDGER_FILE.write_text(json.dumps(ledger))
-    except OSError:
-        pass
+    with file_lock(CREDIT_LEDGER_FILE):
+        ledger = read_credit_ledger()
+        projected = float(ledger["spent"]) + float(cost)
+        if projected > CREDIT_CEILING:
+            raise CreditCeilingError(
+                f"session credit ceiling reached: {ledger['spent']:.0f} spent, this "
+                f"request costs {cost:.0f}, ceiling is {CREDIT_CEILING:.0f}. "
+                f"Raise CENSYS_SESSION_CREDIT_CEILING to continue."
+            )
+        ledger["spent"] = projected
+        ledger["requests"] = int(ledger["requests"]) + 1
+        ledger["last_query"] = (query or "")[:200]
+        try:
+            CREDIT_LEDGER_FILE.parent.mkdir(parents=True, exist_ok=True)
+            CREDIT_LEDGER_FILE.write_text(json.dumps(ledger))
+        except OSError:
+            pass
 
 RETRYABLE_STATUS = (429, 500, 502, 503, 504)
 
@@ -293,8 +349,10 @@ class RateLimitGateway:
         retry_in = max(0.0, self.budget_window - (time.time() - oldest))
         raise RateLimitError(
             f"request budget exhausted: {used}/{self.budget_requests} requests "
-            f"in the last {int(self.budget_window)}s. Retry in ~{int(retry_in)}s "
-            f"or raise --budget-requests."
+            f"in the last {int(self.budget_window)}s. Do NOT wait for it: run "
+            f"`tsa limits fast` (or `tsa limits none`) to raise the pacing for "
+            f"this session, then re-issue the call. Retries in ~{int(retry_in)}s "
+            f"if you would rather not."
         )
 
     # -- helpers -------------------------------------------------------------
@@ -326,16 +384,19 @@ class RateLimitGateway:
     def _record_budget_use(self) -> None:
         if self.state_file is None or self.budget_requests <= 0:
             return
-        stamps = self._load_state()
-        stamps.append(time.time())
-        try:
-            self.state_file.parent.mkdir(parents=True, exist_ok=True)
-            self.state_file.write_text(
-                json.dumps({"window": self.budget_window, "timestamps": stamps})
-            )
-        except OSError as exc:  # budget tracking must never break the query
-            if self.verbose:
-                print(f"[rate-limit] could not persist state: {exc}", file=sys.stderr)
+        # Locked: every subagent and every concurrent run shares this file, and
+        # an unlocked read-append-write loses other processes' requests.
+        with file_lock(self.state_file):
+            stamps = self._load_state()
+            stamps.append(time.time())
+            try:
+                self.state_file.parent.mkdir(parents=True, exist_ok=True)
+                self.state_file.write_text(
+                    json.dumps({"window": self.budget_window, "timestamps": stamps})
+                )
+            except OSError as exc:  # budget tracking must never break the query
+                if self.verbose:
+                    print(f"[rate-limit] could not persist state: {exc}", file=sys.stderr)
 
 
 def get_personal_access_token() -> str:

@@ -120,6 +120,11 @@ def build_capabilities(args: argparse.Namespace) -> str:
     Defaults are fail-closed: no network, no deep dive, no version breakdown.
     Only report-writing is on by default, because reports/<slug>.spec.json is
     this wrapper's output contract.
+
+    Pacing is the exception to fail-closed, because it is a throughput knob and
+    not a safety capability: the default is `fast`, which is bounded an order of
+    magnitude above a whole run but never stalls one. `--rate none` removes
+    pacing entirely; credits are capped separately by --budget.
     """
     breakdown, _ = wants_version_breakdown(args)
     # With no file written there is nothing for this wrapper to read, so the
@@ -135,9 +140,32 @@ def build_capabilities(args: argparse.Namespace) -> str:
             f"versionbreakdown={'on' if breakdown else 'off'}",
             f"reports={'off' if args.no_reports else 'on'}",
             f"printspec={'on' if print_spec else 'off'}",
+            f"rate={args.rate}",
             f"budget={args.budget if args.budget else 0}",
         ]
     )
+
+
+def apply_rate_profile(rate: str) -> str:
+    """Persist the pacing profile before the agent starts.
+
+    Done here rather than left to the agent on purpose. Pacing is read from a
+    state file by every Censys subcommand in every subagent, so it has to be set
+    before the first call - and an unattended run has nobody to notice that the
+    agent skipped the step. `tsa limits` is the only way to set it; this wrapper
+    knows where `tsa` is because it was invoked through it.
+    """
+    tsa = shutil.which("tsa") or str(KIT / "bin" / "tsa")
+    try:
+        proc = subprocess.run(
+            [tsa, "limits", rate, "--by", "tsa run"],
+            capture_output=True, text=True, timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"could not set pacing ({exc}); the tools will use their own default"
+    if proc.returncode != 0:
+        return f"could not set pacing: {(proc.stderr or '').strip()[:120]}"
+    return f"pacing profile set to {rate}"
 
 
 def build_prompt(args: argparse.Namespace, slug: str, capabilities: str) -> str:
@@ -256,6 +284,14 @@ def main() -> int:
         help="Ceiling on estimated Censys credits; a coarse circuit-breaker, not an accountant",
     )
     caps.add_argument(
+        "--rate",
+        choices=("none", "fast", "standard"),
+        default="fast",
+        help="Censys request pacing. none = no pacing at all; fast = bounded but "
+             "never in the way; standard = the original conservative pacing, which "
+             "is below what one assessment needs and will stall it",
+    )
+    caps.add_argument(
         "--version-breakdown",
         action="store_true",
         help="Produce a per-version distribution table (auto-on for --cve or a versioned target)",
@@ -313,6 +349,7 @@ def main() -> int:
 
     print(f"[tsa] agent={agent} slug={slug}", file=sys.stderr)
     print(f"[tsa] caps ={capabilities}", file=sys.stderr)
+    print(f"[tsa] {apply_rate_profile(args.rate)}", file=sys.stderr)
     _, why = wants_version_breakdown(args)
     print(f"[tsa] version breakdown: {why}", file=sys.stderr)
     if args.no_reports:
