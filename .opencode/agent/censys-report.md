@@ -123,3 +123,15 @@ cookies, authorization headers, API keys, or other secrets.
 One message: the two paths you wrote, the counts as rendered, and any schema
 problem you found. If a required key was missing, report it as a failure rather
 than papering over it.
+
+End the message with a status line, as its **last line** - the orchestrator's
+unambiguous signal that you are finished:
+
+```
+STATUS: DONE
+```
+
+Use `STATUS: BLOCKED <why>` if you could not write or render the files, and
+`STATUS: PARTIAL <why>` if you wrote them but the spec was missing something the
+report now says nothing about. Never sleep or wait: every tool you use returns
+when it is done.

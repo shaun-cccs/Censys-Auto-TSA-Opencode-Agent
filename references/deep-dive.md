@@ -22,6 +22,68 @@ Step -> reference file map (the skill's inline "see step N" pointers resolve her
 
 Owned by the `censys-deepdive` subagent.
 
+## Quick card
+
+**8a. Harvest** from the confirmed population, using the base query as the seed:
+`tsa agg --suggest-fields '<base query>' -k 20`, then targeted favicon, title,
+JARM and certificate aggregations - batched, not one per turn.
+
+**8a-bis. Hunt a unique identifier string.** Ranked best first:
+
+1. a **self-identifying support or doc link** - the appliance names its own
+   product line (`product=SMA%201000%20Series`), often with the build number
+2. an **acquired-company or legacy brand name** - survives rebranding in SSO
+   endpoints and redirect targets (`viptela` recovered +112 hosts)
+3. a **quoted HTML attribute**, an internal codename, a product-specific cookie
+   name, a custom header, a static asset path
+
+Reject real English words and common technical terms; they collide.
+
+**Empty harvest is positive evidence, not absence of it.** No title, no markup,
+no favicon and a bare 301/302 is the *signature of a fronted deployment*. Enumerate
+the redirect chain - every hop and the destination host of every hop - and read
+records individually; at single-digit seed sizes narrative reading beats
+aggregation outright.
+
+**With a redirect signal, ask which END runs the product.** Decide by what the
+token *names*, never by same-host versus cross-host:
+
+- names the **destination's** product -> the emitting host is a client, do not
+  count it. Measured: a Shibboleth path in `redirect_chain.path` returns 2,440
+  hosts against 16 in the same-host `uri` field - 99% referral traffic
+- names the **host's own** product or vendor -> count it, even across machines.
+  `Location` matching `meraki\.com` returns 6,320, of which 4,452 carry a Cisco tag
+- names a **third party** shared across vendors -> identifies neither end.
+  `\.okta\.com` returns 10,030 hosts of no single product
+
+**A neighbour is a gate, never a disjunct.** Require it to be observable at the
+unauthenticated boundary. A signal that collapses to near-zero under a gate
+indicts the gate - try two structurally different gates before abandoning it. And
+**measure contamination before gating**: a signal that is already coherent must
+ship as a plain disjunct, because gating a clean 225-host path took it to 0.
+
+**"0 hosts outside" is circularity, not agreement.** Censys builds tags from the
+very artifacts you would use as confirmation. Test both directions; if both are
+~0, treat the pair as one signal and corroborate from a different layer - cert,
+JARM, port, DNS.
+
+**8b. Test every candidate in one call**, always subtracting the base:
+
+```bash
+tsa candidates '<base query>' '<cand 1>' '<cand 2>' '<cand 3>'
+```
+
+Read the titles it prints, not just the counts. Discard any candidate whose
+incremental population is not coherently the product.
+
+**8c-8e.** `or` the survivors onto the **intact** original, prefer `=` over `:`,
+validate, re-run `tsa assess`, and report the delta. Classify every rejection as
+**empirically closed** (queried, genuinely not there) or **role judgement** (set
+aside as substrate, sibling or too generic) - the second must be re-opened when
+the role changes, and anything never queried is *untested*, not rejected.
+
+## The full procedure
+
 GATE: the user-facing offer at the top of this step is owned by the
 `censys-tsa` orchestrator, which asks via the `question` tool. The subagent is
 invoked ONLY after the user has already said yes, so it starts at 8a and must

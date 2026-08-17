@@ -22,6 +22,43 @@ Step -> reference file map (the skill's inline "see step N" pointers resolve her
 
 Owned by the `censys-fingerprint` subagent.
 
+## Quick card
+
+1. **Probe.** One call, not four: `tsa probe '<1-2 word seed>'`. It samples the
+   seed host-scoped and buckets `product` in **all three** tag trees -
+   `host.services.software`, `host.services.hardware`, `host.operating_system`.
+   Appliances are routinely absent from `software` and fully tagged under
+   `hardware`; checking one tree is the commonest way to conclude "untagged"
+   wrongly. Add `--wide` for vendors, ports, titles and favicon hashes.
+2. **A bucket names the target in any tree -> step 2.** Nothing does -> step 3.
+3. **Step 2, tagging exists.** Confirm the vendor, then bind vendor and product
+   to the *same* object:
+   `host.services.software:(vendor="x" and product="y")` - never a bare
+   `product=`, which matches a host running someone else's product too. Then two
+   checks, both mandatory:
+   - read the tag's own evidence (`tsa search '<tag query>' --max-results 1
+     --format json`): a tag whose only evidence is `favicons.hash_*` is worth
+     exactly as much as a favicon, so treat it as a candidate, not a base query
+   - test for over-counting: aggregate titles and ports over
+     `<tag query> and not labels: "HONEYPOT" and not (<evidence fingerprint>)`.
+     A remainder of unrelated products means the tag is inflated - fall back to
+     step 3 and keep the tag for version enrichment only. Confirm any
+     over-counting verdict at service scope (`--count-hosts`, keep
+     `filter_by_query`) before acting on it.
+4. **Step 3, no usable tag.** Build the fingerprint from raw evidence. Sweep with
+   `tsa agg --suggest-fields '<seed>'` or target fields directly, then **invert**:
+   take the dominant favicon / title / JARM / cert organisation, use it as the
+   query, and aggregate back on product, hardware and OS to check the population
+   is coherent. Favicons: always `favicons.hash_shodan`, and **always quote the
+   value** - a leading minus 422s unquoted.
+5. **Step 3b, web research.** Last resort, capability-gated, never a way to find
+   signals you have not looked for in Censys. Never contact an assessed host.
+
+Batch the independent calls in each step; the only thing that must be serial is
+what genuinely depends on a previous answer.
+
+## The full procedure
+
 Steps 1-3 below are the discovery core. The dense aggregation-semantics
 subsections that originally sat inside step 3 are now a reference of their own:
 run `tsa ref aggregation-semantics` before any aggregation, and

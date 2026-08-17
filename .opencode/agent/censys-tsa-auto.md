@@ -159,20 +159,44 @@ answer; a confident wrong number is not.
    change it - but if a Censys call ever reports a rate limit, `tsa limits fast`
    and re-issue that one call. **Never wait one out.**
 
-1. Run `tsa ref workspace`, `tsa ref cenql-rules`,
-   `tsa ref counting-and-report`, `tsa ref credits`.
-   Record the starting credit balance.
+1. Run `tsa ref workspace`, `tsa ref leads`, `tsa ref cenql-rules`,
+   `tsa ref counting-and-report`, `tsa ref credits` - **in one bash call**, not
+   five turns. Record the starting credit balance.
 
-2. Invoke `@censys-fingerprint`. **Your task prompt to it MUST begin with the
-   line `NON-INTERACTIVE MODE.`** and must carry a `CAPABILITIES:` line stating
-   exactly what was granted. If web research is disabled, tell it to skip step
-   3b; if endpoint validation is disabled, tell it to skip step 0b tier-2b.
-   Either way it must record every skipped gate as a caveat.
+2. **Recon, then fan out.** `tsa ref leads` is the protocol and it binds you.
 
-3. Validate its `baseline.query` against `tsa ref cenql-rules` and sample
-   it:
    ```bash
-   tsa search '<base query>' --max-results 5 --format table
+   tsa probe '<1-2 word seed>'
+   ```
+
+   That is step 1's whole sweep - the host-scoped seed sample plus `product` in
+   all three tag trees - in one call. Derive 2-4 leads from it, then invoke **one
+   `@censys-fingerprint` per lead, all in a single message** so they run
+   concurrently. Four workers is the default, six the ceiling, three waves the
+   limit.
+
+   **Your task prompt to each MUST begin with the line `NON-INTERACTIVE MODE.`**
+   and must carry `MODE: lead` (or `recon`), the lead as a hypothesis with its
+   seed query, the Censys call cap, the references to read `--brief`, and a
+   `CAPABILITIES:` line stating exactly what was granted. If web research is
+   disabled, tell it to skip step 3b; if endpoint validation is disabled, tell it
+   to skip step 0b tier-2b. Either way it must record every skipped gate as a
+   caveat.
+
+   A worker's last line is its `STATUS:`. If a worker returns without its
+   `STATUS:` line, treat the result as partial, use what you got, and do not
+   re-invoke that worker.
+
+   **Never issue two independent Censys calls in consecutive turns** - batch them
+   with `tsa probe`, `tsa candidates`, `tsa batch`, or several tool calls in one
+   message. **Never sleep, never poll, never wait for a background job.** A task
+   call returns when the worker is done; there is nothing else in flight.
+
+3. Reconcile the workers' candidate queries into one base query, validate it
+   against `tsa ref cenql-rules`, and sample it - with any competing variant, in
+   one call:
+   ```bash
+   tsa batch --sample '<base query>' --count '<variant A>' --count '<variant B>'
    ```
    If the sample is obviously wrong, tighten once and re-sample. Do not loop
    indefinitely - if it is still wrong, proceed and record the problem loudly in
@@ -187,10 +211,16 @@ answer; a confident wrong number is not.
 
 5. Measure the credit delta. Never estimate.
 
-6. If `deepDive` is `always`, invoke `@censys-deepdive` with the validated base
-   query and the step 4 counts, and merge its `deep_dive` fragment. If it is
-   `never` or `after`, skip it - there is no user to ask, so `after` means skip
-   here - and record the floor caveat.
+6. If `deepDive` is `always`, run the hunt: **one `@censys-deepdive` per signal
+   family, all in a single message**, each with `MODE: family`, the validated base
+   query, the step 4 counts and a 20-call cap. The families are favicon+title,
+   cert+JARM, path+header, redirect+SSO, and release artifacts. Union their
+   surviving signals onto the intact original yourself, validate it, re-run
+   `tsa assess` on it, and assemble the `deep_dive` fragment. For a small hunt,
+   one worker with `MODE: full` may do 8a-8e and return the fragment whole.
+
+   If `deepDive` is `never` or `after`, skip it - there is no user to ask, so
+   `after` means skip here - and record the floor caveat.
 
 7. If `writeReports` is enabled, assemble the merged spec and invoke
    `@censys-report` with it and the slug. **This is the output contract that

@@ -141,17 +141,43 @@ run_stdlib() {
 
 cmd_ref() {
     if [ $# -eq 0 ]; then
-        printf 'Workflow references (use: tsa ref <name>)\n\n'
+        printf 'Workflow references (use: tsa ref <name> [--brief])\n\n'
         for f in "$REFERENCES"/*.md; do
             name=$(basename "$f" .md)
             printf '  %-24s %s\n' "$name" "$(sed -n 's/^# //p' "$f" | head -1)"
         done
+        printf '\n--brief prints just the quick card: the procedure and the commands,\n'
+        printf 'without the worked cases. Start there; read the full text when a step\n'
+        printf 'is ambiguous or a judgement call needs its rationale.\n'
         return 0
     fi
     name=$1
+    shift
     file="$REFERENCES/$name.md"
     [ -f "$file" ] || die "no such reference: $name (try: tsa ref)"
-    cat "$file"
+
+    case ${1:-} in
+        --brief | -b)
+            #  A worker with one hypothesis to test does not need 25KB of worked
+            #  cases in its context on every subsequent turn - it needs the
+            #  procedure and the commands. The full text stays one call away.
+            brief=$(awk '
+                /^## Quick card/ { inside=1; print; next }
+                inside && /^## / { exit }
+                inside { print }
+            ' "$file")
+            if [ -n "$brief" ]; then
+                printf '%s\n' "$brief"
+                printf '\nFull reference: tsa ref %s\n' "$name"
+            else
+                #  No card written yet: print everything rather than nothing.
+                printf 'tsa: %s has no quick card; printing it in full\n\n' "$name" >&2
+                cat "$file"
+            fi
+            ;;
+        "") cat "$file" ;;
+        *) die "unexpected argument: ${1} (only --brief is supported)" ;;
+    esac
 }
 
 # --------------------------------------------------------------- doc (CenQL)
@@ -267,7 +293,9 @@ Offline (standard library only, no uv, no credits):
                           writes ./reports/<slug>.spec.json in the current dir.
 
 Documentation, shipped with the kit:
-  tsa ref [name]          Workflow references. No argument lists them.
+  tsa ref [name] [--brief]
+                          Workflow references. No argument lists them; --brief
+                          prints just the procedure and the commands.
   tsa doc [name] [--grep PATTERN]
                           CenQL and queryable-field docs. No argument lists them.
 
