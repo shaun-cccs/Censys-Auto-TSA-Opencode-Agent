@@ -620,6 +620,26 @@ class BatchCostsAreMetered(unittest.TestCase):
             self.cost("tsa probe 'x' --wide"), self.cost("tsa probe 'x'")
         )
 
+    @unittest.skipIf(censys_batch is None, "censys-platform SDK not available")
+    def test_the_probe_price_tracks_the_calls_the_probe_actually_makes(self):
+        """A breaker that under-prices a command is a breaker with a hole in it.
+
+        This caught a real drift: `host.services.protocol` was added to the probe,
+        taking it from 4 calls to 5, while the plugin still charged 4. The bound is
+        derived from the field tuples rather than written down twice, so adding a
+        field to the sweep fails here until the price is updated.
+        """
+        plain = 1 + len(censys_batch.PROBE_TREES) + len(censys_batch.PROBE_PROTOCOL)
+        wide = plain + len(censys_batch.PROBE_WIDE)
+        self.assertGreaterEqual(
+            self.cost("tsa probe 'x'"), plain,
+            f"tsa probe issues {plain} requests; the plugin charges less",
+        )
+        self.assertGreaterEqual(
+            self.cost("tsa probe 'x' --wide"), wide,
+            f"tsa probe --wide issues {wide} requests; the plugin charges less",
+        )
+
     def test_candidates_is_priced_per_candidate(self):
         self.assertGreaterEqual(self.cost("tsa candidates 'base' 'c1' 'c2'"), 5)
         self.assertGreater(

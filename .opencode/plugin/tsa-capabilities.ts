@@ -191,8 +191,12 @@ function censysCost(command: string): number {
     return 16 // 1 + 2 per candidate
   }
   if (/\btsa\s+probe\b|censys_batch\.py probe/.test(command)) {
-    if (/--wide/.test(command)) return 9 // sample + 3 tag trees + 5 wide fields
-    return 4 // sample + the three tag trees
+    // Keep in step with censys_batch.PROBE_TREES + PROBE_PROTOCOL + PROBE_WIDE
+    // plus the seed sample. A test derives the real count from those tuples and
+    // fails if this drifts below it, because a breaker that under-prices a
+    // command is a breaker with a hole in it.
+    if (/--wide/.test(command)) return 10 // sample + 3 trees + protocol + 5 wide
+    return 5 // sample + the three tag trees + the decoded-protocol bucket
   }
   if (/\btsa\s+batch\b|censys_batch\.py batch/.test(command)) {
     if (/--plan|\s-p\s/.test(command)) return 20 // a file we cannot read
