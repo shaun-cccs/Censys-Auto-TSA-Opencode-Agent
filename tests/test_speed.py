@@ -473,6 +473,41 @@ class Rendering(unittest.TestCase):
             self.assertEqual(len(censys_batch.load_plan(str(array))), 1)
             self.assertEqual(len(censys_batch.load_plan(str(lines))), 2)
 
+    def candidate_report(self, incremental, witness):
+        """Render one candidate row, with the base count already in place."""
+        result = {
+            "wall_seconds": 1.0,
+            "items": [
+                {"op": "count", "label": "base", "total": 100, "error": None,
+                 "buckets": [], "hits": [], "query": "base"},
+                {"op": "count", "label": "cand", "total": incremental, "error": None,
+                 "buckets": [], "hits": [], "query": "cand and not (base)"},
+                {"op": "agg", "label": "cand", "total": incremental, "error": None,
+                 "buckets": witness, "hits": [], "query": "cand and not (base)"},
+            ],
+        }
+        return censys_batch.format_candidates(result, "base")
+
+    def test_a_real_increment_with_no_titles_is_called_out(self):
+        """Measured on a live port candidate: +100,448 hosts and zero titles.
+
+        An empty witness on a real increment is evidence - non-HTTP, fronted, or
+        simply not the product - and printing nothing beside the count read as
+        "no problem found", which is the opposite of what it means.
+        """
+        report = self.candidate_report(100_448, [])
+        self.assertIn("+100,448", report)
+        self.assertRegex(report, r"(?i)no titles on the incremental hosts")
+
+    def test_a_zero_increment_says_the_two_reasons_apart(self):
+        report = self.candidate_report(0, [])
+        self.assertIn("--totals", report)
+
+    def test_witness_titles_are_shown_when_there_are_any(self):
+        report = self.candidate_report(927, [{"key": "Log in to FishEye", "count": 901}])
+        self.assertIn("Log in to FishEye", report)
+        self.assertNotIn("no titles on the incremental", report)
+
 
 @unittest.skipIf(censys_batch is None, "censys-platform SDK not available")
 class TimeoutPolicy(unittest.TestCase):

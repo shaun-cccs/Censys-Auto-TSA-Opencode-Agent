@@ -462,6 +462,16 @@ def format_candidates(result: Dict[str, Any], base: str, top: int = 5) -> str:
                 "             nothing new - either the base already covers these hosts "
                 "or the candidate matches nothing at all (--totals tells them apart)"
             )
+        elif isinstance(gain, int) and gain > 0:
+            #  An empty witness on a real increment is EVIDENCE, not silence: those
+            #  hosts serve no HTML title at all, which is the signature of a
+            #  non-HTTP service or a fronted deployment - and, for a bare port
+            #  candidate, usually of a population that is not the product. Saying
+            #  nothing here reads as "no problem found".
+            lines.append(
+                "             no titles on the incremental hosts - non-HTTP, fronted, "
+                "or not the product. Read records before adding this one"
+            )
         for error in row["errors"]:
             lines.append(f"             ! {error}")
     lines += [
