@@ -247,13 +247,23 @@ class QuickCards(unittest.TestCase):
     later turn of that worker.
     """
 
-    CARDED = ["leads", "fingerprinting", "deep-dive", "cenql-rules",
-              "aggregation-semantics", "cve-workflow"]
+    CARDED = ["leads", "workspace", "fingerprinting", "deep-dive", "cenql-rules",
+              "aggregation-semantics", "cve-workflow", "counting-and-report"]
 
     def test_the_references_workers_read_have_a_quick_card(self):
         for name in self.CARDED:
             with self.subTest(reference=name):
                 self.assertIn("## Quick card", reference(name))
+
+    def test_every_reference_an_agent_is_told_to_read_briefly_has_a_card(self):
+        """`--brief` falls back to the full text, silently costing the saving."""
+        for agent in AGENTS:
+            for name in re.findall(r"tsa ref ([a-z][a-z-]*) --brief", body(agent)):
+                with self.subTest(agent=agent, reference=name):
+                    self.assertIn(
+                        "## Quick card", reference(name),
+                        f"{agent} reads {name} --brief but it has no card",
+                    )
 
     def test_a_card_is_a_fraction_of_the_full_text(self):
         for name in self.CARDED:

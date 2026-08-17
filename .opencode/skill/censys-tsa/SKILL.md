@@ -19,10 +19,11 @@ it directly if you can:
 @censys-tsa CVE-2024-21762
 ```
 
-`censys-tsa` is interactive: it opens by asking five questions about what it is
-allowed to do (web research, endpoint validation, deep dive, credit budget,
-report output) and then runs the assessment, delegating fingerprinting, the
-signature hunt, and report writing to its own subagents.
+`censys-tsa` is interactive: it opens by asking what it is allowed to do (web
+research, endpoint validation, deep dive, credit budget, report output, request
+pacing) and then runs the assessment, fanning fingerprinting out across several
+concurrent subagents and delegating the signature hunt and report writing the
+same way.
 
 For an unattended run - CI, a batch of targets, no questions asked - use the
 command instead:

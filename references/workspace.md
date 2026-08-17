@@ -6,6 +6,45 @@ installed rather than checked out. references/ is canonical for this project.
 
 # Tools, prerequisites, rate limits, credentials
 
+## Quick card
+
+**There are no paths in this workflow.** Everything is a `tsa` subcommand; never
+guess a path, never `cd`, never call an interpreter. Output lands in `./reports/`
+relative to where the user is working.
+
+| Command | For | Cost |
+| --- | --- | --- |
+| `tsa probe <seed>` | step 1 in one call: seed sample + all three tag trees | 4 (9 `--wide`) |
+| `tsa candidates <base> <cand>...` | step 8b in one call: increment + titles per candidate | 1 + 2 each |
+| `tsa batch --count/--sample/--agg ...` | any independent calls, run together | 1 each |
+| `tsa agg <field> <query>` | one bucket list. `--count-hosts` for host counts | 1 |
+| `tsa search <query>` | validation and pivots. Keep `--max-results 5` | 1 |
+| `tsa assess <query>` | the TSA itself: global + country, honeypots excluded | 2 |
+| `tsa cve <ID>` · `tsa credits` · `tsa budget` · `tsa limits` · `tsa timeline` | context, spend, pacing, timing | free |
+| `tsa ref <name> [--brief]` · `tsa doc <name> [--grep P]` | this kit's own docs | free |
+
+**Never spend a turn on a single call when you have several independent calls.** A
+call costs a second; a turn costs tens of seconds. Batch, or issue several tool
+calls in one message.
+
+**Counts always come from `host.*` queries.** `web.*` and `cert.*` are pivots.
+
+**Never hand-add `not labels: "HONEYPOT"` or a country clause** - `tsa assess`
+appends both.
+
+**Never sleep, never poll, never wait out a rate limit.** A limit error is a
+result: report it, or `tsa limits fast` and re-issue that one call.
+
+**Read state through the tools, never by opening a file** - `tsa budget`,
+`tsa credits`, `tsa limits`. Those files live outside the workspace, and reading
+one directly raises a permission prompt that hangs a subagent.
+
+**Credentials** are `CENSYS_PERSONAL_ACCESS_TOKEN` and `CENSYS_ORG_ID`, from the
+environment only. Never print one, never write one to a file, never ask the user
+to paste one. If something is missing, `tsa doctor` says so - report that and stop.
+
+## The full reference
+
 **There are no paths in this workflow.** Everything ships behind one command,
 `tsa`, which finds its own installation. Run it from wherever the user is
 working; output files land in the current directory. Never guess at a path to a

@@ -23,6 +23,45 @@ Step -> reference file map (the skill's inline "see step N" pointers resolve her
 Owned by the `censys-tsa` orchestrator, not by a subagent. Step 6 is the only
 step that produces the headline counts.
 
+## Quick card
+
+**5. Validate before counting.** Sample the query - together with any competing
+variant, in one call:
+
+```bash
+tsa batch --sample '<base query>' --count '<variant A>' --count '<variant B>'
+```
+
+Are the hits really the product? Tighten on false positives; widen if the count
+is implausibly low against the seed. Validation ends at Censys and public
+research - **never connect to a matching host.**
+
+**6. Run the TSA.**
+
+```bash
+tsa assess '<base query>' --product '<Product Name>'
+```
+
+It appends `not labels: "HONEYPOT"` to both counts and the country clause to the
+second, and reports measured credits. Do not add either clause yourself.
+`--country <name>` changes the second scope.
+
+**7. Report.** Seven things must be *known*: product summary · fingerprint
+rationale naming the step that produced the query (and, for a CVE, the counting
+basis: vulnerability-tag, version-scoped or product-exposure-only) · the base
+query · global count · country count · **measured** credits, never estimated ·
+caveats covering fingerprint confidence, version observability, and where the
+query over- or under-counts.
+
+**That list is what goes in the written report, not what you print.** The
+terminal form is the compact block defined in your own agent prompt: product,
+one or two sentences, the baseline query with both counts, the widened query and
+delta if a deep dive ran, one `Basis:`/`Credits:` line, at most four one-line
+caveats. Never print the honeypot or country variants, and never print a platform
+URL.
+
+## The full reference
+
 ### 5. Validate before counting
 
 ```bash
