@@ -21,6 +21,7 @@ script, a reference or a doc, and never `cd` anywhere.
 | `tsa cve` | Retrieve a CVE record from cve.org, falling back to NVD. Context only, no parsing. Free. |
 | `tsa credits` | Censys credit (token) balance and usage reporting. Free. |
 | `tsa budget` | Session credit ledger state. Free. |
+| `tsa timeline` | Where the run's wall-clock time went: time inside Censys versus idle gap. Free. |
 | `tsa report` | Render a completed investigation as a markdown report from a JSON spec. Free. |
 | `tsa run` | Non-interactive wrapper. Drives the `censys-tsa-auto` agent and emits `reports/<slug>.spec.json` on stdout. |
 | `tsa doctor` | Verify the installation: dependencies, credentials, links, capability plugin. Free. |

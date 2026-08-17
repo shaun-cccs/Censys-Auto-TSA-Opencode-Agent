@@ -63,10 +63,20 @@ def shipped_prompts():
 
 def load_tsa_run():
     """Import ``utils/tsa_run.py``, the unattended driver behind `tsa run`."""
-    loader = importlib.machinery.SourceFileLoader(
-        "tsa_run", str(ROOT / "utils" / "tsa_run.py")
-    )
-    spec = importlib.util.spec_from_loader("tsa_run", loader)
+    return load_util("tsa_run")
+
+
+def load_util(name: str):
+    """Import a `utils/<name>.py` script by path.
+
+    The utils are deliberately flat scripts rather than a package - see the
+    virtual-project note in AGENTS.md - so there is nothing importable to name.
+    Only standard-library-only utils can be loaded this way without the SDK
+    present; ``censys_metrics`` and ``censys_limits`` qualify by design, which is
+    what keeps them testable in the fast suite.
+    """
+    loader = importlib.machinery.SourceFileLoader(name, str(ROOT / "utils" / f"{name}.py"))
+    spec = importlib.util.spec_from_loader(name, loader)
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
     return module

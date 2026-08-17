@@ -28,6 +28,8 @@ from typing import Any, Deque, Dict, List, Optional, Tuple
 
 from censys_platform import SDK, models
 
+import censys_metrics
+
 # Organization ID for the Censys Platform tenant. No default: see get_org_id().
 CENSYS_ORG_ID = os.environ.get("CENSYS_ORG_ID", "")
 
@@ -370,7 +372,12 @@ def censys_search_page(
             # DEFAULT_TIMEOUT_MS and max_retries, not by this ledger.
             charge_credits(estimate_query_cost(query), query)
             gateway.acquire()
-            res = sdk.global_data.search(search_query_input_body=body)
+            # Timed inside the gateway, so the recorded duration is the Censys
+            # round trip alone and never the rate-limit sleep that preceded it.
+            # `tsa timeline` relies on that split to tell a slow API apart from
+            # a stalled workflow.
+            with censys_metrics.timed("search", query=query):
+                res = sdk.global_data.search(search_query_input_body=body)
             return res.result, None
         except CreditCeilingError as e:
             return None, f"credit_ceiling: {e}"

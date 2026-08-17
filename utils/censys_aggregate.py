@@ -41,6 +41,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from censys_platform import SDK, models
 
+import censys_metrics
+
 from censys_query import (
     API_REQUEST_COST,
     CENSYS_ORG_ID,
@@ -130,7 +132,10 @@ def censys_aggregate(
         try:
             charge_credits(API_REQUEST_COST, query)
             gateway.acquire()
-            res = sdk.global_data.aggregate(search_aggregate_input_body=body)
+            # Timed inside the gateway: the recorded duration is the Censys
+            # round trip alone, never the rate-limit sleep before it.
+            with censys_metrics.timed("agg", query=query, field=field):
+                res = sdk.global_data.aggregate(search_aggregate_input_body=body)
             return res.result, None
         except CreditCeilingError as e:
             return None, f"credit_ceiling: {e}"

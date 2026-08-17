@@ -242,6 +242,9 @@ Censys queries (need uv + the censys-platform SDK, cost credits):
   tsa budget              Session credit ledger state. Free.
 
 Offline (standard library only, no uv, no credits):
+  tsa timeline [--since S] [--all] [-f json]
+                          Where a run's wall-clock time went: time inside Censys
+                          versus idle gap. Read this before optimising anything.
   tsa cve <CVE-ID> [--single] [-f json]
                           Retrieve a CVE record from cve.org, falling back to NVD.
   tsa report --template   Print the report spec schema.
@@ -285,6 +288,7 @@ case $command in
     agg | aggregate) run_dep censys_aggregate.py "$@" ;;
     credits) run_dep censys_credits.py "$@" ;;
     budget) run_dep censys_session_budget.py "$@" ;;
+    timeline) run_stdlib censys_metrics.py "$@" ;;
     cve) run_stdlib cve_lookup.py "$@" ;;
     report) run_stdlib tsa_report.py "$@" ;;
     run) run_stdlib tsa_run.py "$@" ;;
