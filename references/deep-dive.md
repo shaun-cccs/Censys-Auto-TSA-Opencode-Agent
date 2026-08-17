@@ -319,11 +319,12 @@ Recover the gap with gated disjuncts rather than accepting the clean number.
 
 **Replacing a fingerprint is a symmetric-difference measurement.** Never compare
 two candidate base queries by total count alone - two queries can agree on a
-total while disagreeing on hundreds of hosts. Run both directions:
+total while disagreeing on hundreds of hosts. Run both directions, together:
 
 ```bash
-tsa search '<new> and not (<old>)' --max-results 1   # gained
-tsa search '<old> and not (<new>)' --max-results 1   # lost
+tsa batch --count '<new> and not (<old>)' \
+          --count '<old> and not (<new>)' \
+          --count '<new>' --count '<old>'
 ```
 
 Report both figures. "2,630 vs 2,620" hides that the new query gained 54 and
@@ -356,7 +357,27 @@ the product, discard it.
 **8b. Test each candidate in isolation, excluding the original population.**
 A candidate is only worth adding if it finds hosts the base query missed *and*
 those hosts are genuinely the product. Always subtract the base query so you are
-looking purely at the incremental hits:
+looking purely at the incremental hits.
+
+**Test every candidate in one call.** The tests are independent of each other, so
+`tsa candidates` runs them all concurrently and prints, per candidate, the
+incremental host count *and* the titles of those incremental hosts - the count
+and the evidence you judge it by, together:
+
+```bash
+tsa candidates '<base query>' \
+  'host.services.endpoints.http.favicons.hash_shodan="<hash>"' \
+  'host.services.endpoints.http.html_title="Log in to FishEye"' \
+  'host.services.endpoints.http.body=~`[Ff]ecru`'
+```
+
+An increment of **0** is ambiguous - either the base query already covers those
+hosts, or the candidate matches nothing at all. `--totals` counts each candidate
+on its own as well and tells the two apart. It costs one extra call per
+candidate, so use it when the answer matters.
+
+The longhand, one candidate at a time, when you need to vary the witness field or
+read raw records:
 
 ```bash
 tsa search \

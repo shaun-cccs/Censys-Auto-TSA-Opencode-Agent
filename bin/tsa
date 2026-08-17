@@ -237,6 +237,15 @@ Censys queries (need uv + the censys-platform SDK, cost credits):
                           Rate-limited host search. Validation and pivots. 1 credit.
   tsa agg <field> <query> [-k N] [--count-hosts] [--compare-levels]
                           Bucket a field across a query. The fingerprint tool. 1 credit.
+  tsa probe <seed> [--wide]
+                          Step 1 in ONE call: full-text sample plus the product
+                          bucket in all three tag trees. 4 credits (9 with --wide).
+  tsa candidates <base> <cand>... [--totals]
+                          Step 8b in ONE call: incremental hosts each candidate
+                          adds over the base, with the titles of those hosts.
+                          1 + 2 per candidate.
+  tsa batch [--count Q]... [--sample Q]... [--agg FIELD Q]... [-p plan.json]
+                          Any set of independent calls, run together. 1 each.
   tsa credits balance | usage [--granularity daily|monthly]
                           Credit balance and usage. Free.
   tsa budget              Session credit ledger state. Free.
@@ -286,6 +295,9 @@ case $command in
     assess) run_dep censys_tsa.py "$@" ;;
     search) run_dep censys_query.py "$@" ;;
     agg | aggregate) run_dep censys_aggregate.py "$@" ;;
+    batch) run_dep censys_batch.py batch "$@" ;;
+    probe) run_dep censys_batch.py probe "$@" ;;
+    candidates) run_dep censys_batch.py candidates "$@" ;;
     credits) run_dep censys_credits.py "$@" ;;
     budget) run_dep censys_session_budget.py "$@" ;;
     timeline) run_stdlib censys_metrics.py "$@" ;;

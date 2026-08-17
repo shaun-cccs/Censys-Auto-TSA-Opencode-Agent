@@ -42,6 +42,13 @@ DEFAULT_MAX_PER_MINUTE = int(os.environ.get("CENSYS_MAX_PER_MINUTE", 20))
 DEFAULT_BUDGET_REQUESTS = int(os.environ.get("CENSYS_BUDGET_REQUESTS", 200))
 DEFAULT_BUDGET_WINDOW = float(os.environ.get("CENSYS_BUDGET_WINDOW", 3600))
 
+# How many Censys requests one process may have in flight. Only the batching
+# entrypoints use it; a single search or aggregation is one request either way.
+# It is a ceiling on sockets, not a promise of parallelism: the rate-limit
+# gateway holds its lock while it paces, so a profile with a min interval
+# serialises concurrent callers regardless of this number.
+DEFAULT_CONCURRENCY = max(1, int(os.environ.get("CENSYS_CONCURRENCY", 8)))
+
 # Per-request HTTP timeout, in milliseconds, passed to the SDK.
 #
 # This must be set explicitly. Without it the SDK's own default governs, and a
@@ -55,6 +62,26 @@ DEFAULT_BUDGET_WINDOW = float(os.environ.get("CENSYS_BUDGET_WINDOW", 3600))
 # sum, so keep it well under the patience of a human watching a TSA run. 60s x 4
 # attempts + 7s backoff is already about four minutes.
 DEFAULT_TIMEOUT_MS = int(os.environ.get("CENSYS_TIMEOUT_MS", 60_000))
+
+# How many attempts a query that the BACKEND could not finish is allowed.
+#
+# A read timeout or a 504 is not a transient blip: it means Censys started the
+# query and gave up. Retrying it unchanged asks the same backend to do the same
+# impossible work, and the default retry policy turns one bad union query into
+# four timeouts - measured at over four minutes of wall time and four charged
+# credits for a guaranteed failure. Two attempts (one retry, in case the first
+# really was network weather) then a message telling the caller to simplify the
+# query instead.
+TIMEOUT_MAX_ATTEMPTS = int(os.environ.get("CENSYS_TIMEOUT_ATTEMPTS", 2))
+
+# Advice, not just an error: the agents reading this cannot see a stack trace,
+# and "retry harder" is the wrong instinct here.
+TIMEOUT_ADVICE = (
+    "the Censys backend did not finish this query. Do NOT retry it unchanged - "
+    "simplify it: split a long `or` union into separate counts, anchor or drop a "
+    "regex, narrow the seed, or count a smaller population."
+)
+
 DEFAULT_STATE_FILE = Path(
     os.environ.get(
         "CENSYS_RATE_STATE_FILE",
@@ -145,6 +172,29 @@ def charge_credits(cost: float, query: str = "") -> None:
         pass
 
 RETRYABLE_STATUS = (429, 500, 502, 503, 504)
+
+# Statuses that mean "the backend gave up on this query", not "try again in a
+# moment". Retried like a blip they burn a minute and a credit apiece.
+BACKEND_GAVE_UP_STATUS = (504,)
+
+
+def is_timeout(exc: BaseException) -> bool:
+    """Did this exception mean the request timed out?
+
+    Matched on the type name and message rather than on an exception class,
+    because the timeout can surface as httpx.ReadTimeout, an SDK wrapper around
+    it, or a bare socket error depending on where it was raised. All three want
+    the same treatment, and importing httpx here to catch one of them would be a
+    dependency on an implementation detail of the SDK.
+
+    Both spellings are checked: types say "Timeout", messages often say "timed
+    out".
+    """
+    if "timeout" in type(exc).__name__.lower():
+        return True
+    message = str(exc)[:400].lower()
+    return "timeout" in message or "timed out" in message
+
 
 
 class RateLimitError(RuntimeError):
@@ -356,6 +406,8 @@ def censys_search_page(
     Returns ``(search_query_response, error)``; exactly one is non-None.
     Transient errors (HTTP 429/5xx, network blips) are retried with
     exponential backoff. Every attempt passes through the rate-limit gateway.
+
+    A **timeout** is not treated as transient: see TIMEOUT_MAX_ATTEMPTS.
     """
     body: Dict[str, Any] = {"query": query, "page_size": page_size}
     if page_token:
@@ -369,7 +421,7 @@ def censys_search_page(
             # bill for it - so counting only the successful attempt would
             # under-report spend, which is the one direction a circuit breaker
             # must never err in. The cost of a slow query is therefore bounded by
-            # DEFAULT_TIMEOUT_MS and max_retries, not by this ledger.
+            # DEFAULT_TIMEOUT_MS and TIMEOUT_MAX_ATTEMPTS, not by this ledger.
             charge_credits(estimate_query_cost(query), query)
             gateway.acquire()
             # Timed inside the gateway, so the recorded duration is the Censys
@@ -385,6 +437,8 @@ def censys_search_page(
             return None, f"rate_limited: {e}"
         except models.SDKBaseError as e:
             status = getattr(e, "status_code", None)
+            if status in BACKEND_GAVE_UP_STATUS and attempt >= TIMEOUT_MAX_ATTEMPTS - 1:
+                return None, f"query_timeout status={status}: {TIMEOUT_ADVICE}"
             if status in RETRYABLE_STATUS and attempt < max_retries - 1:
                 time.sleep(base_delay * (2**attempt))
                 continue
@@ -393,6 +447,8 @@ def censys_search_page(
                 f"msg={str(getattr(e, 'message', e))[:120]}"
             )
         except Exception as e:  # noqa: BLE001 - network/unexpected
+            if is_timeout(e) and attempt >= TIMEOUT_MAX_ATTEMPTS - 1:
+                return None, f"query_timeout: {TIMEOUT_ADVICE}"
             if attempt < max_retries - 1:
                 time.sleep(base_delay * (2**attempt))
                 continue
@@ -408,6 +464,7 @@ def run_query(
     org_id: str = CENSYS_ORG_ID,
     token: Optional[str] = None,
     verbose: bool = False,
+    timeout_ms: int = DEFAULT_TIMEOUT_MS,
 ) -> Dict[str, Any]:
     """Search Censys, paginating until ``max_results`` hits are collected."""
     if max_results <= 0:
@@ -424,7 +481,7 @@ def run_query(
     with SDK(
         organization_id=get_org_id(org_id),
         personal_access_token=token,
-        timeout_ms=DEFAULT_TIMEOUT_MS,
+        timeout_ms=timeout_ms,
     ) as sdk:
         while len(hits) < max_results:
             remaining = max_results - len(hits)
@@ -538,6 +595,13 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="Output rendering for stdout",
     )
     parser.add_argument("--org-id", default=CENSYS_ORG_ID, help="Censys organization ID")
+    parser.add_argument(
+        "--timeout-ms",
+        type=int,
+        default=DEFAULT_TIMEOUT_MS,
+        help="Per-request HTTP timeout. Lower it for exploratory heavy queries: a "
+             "query the backend cannot finish fails faster and cheaper",
+    )
 
     limits = parser.add_argument_group("rate limiting")
     limits.add_argument(
@@ -600,6 +664,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             page_size=args.page_size,
             org_id=args.org_id,
             verbose=args.verbose,
+            timeout_ms=args.timeout_ms,
         )
     except RateLimitError as e:
         print(f"error: {e}", file=sys.stderr)

@@ -50,14 +50,36 @@ CPE `part` letter tells you which tree a value belongs to: `a` = application,
 `h` = hardware, `o` = operating system.
 
 ```bash
-# 1-2 word full-text seed: does the name appear anywhere in host records?
-tsa search '"MOVEit"' --max-results 5 --format table
+# All of step 1 in ONE call: the seed sample plus every tag tree, concurrently.
+tsa probe '"MOVEit"'
 
-# Check ALL THREE trees before deciding tagging is absent
+# Add vendors, ports, titles and favicon hashes when you can already tell this
+# is heading for step 3 (5 more calls):
+tsa probe '"MOVEit"' --wide
+```
+
+`tsa probe` is the preferred form because the sweep is four independent calls and
+four separate turns is where a TSA loses its time. The equivalent longhand, when
+you need to vary something it does not expose:
+
+```bash
+# 1-2 word full-text seed: does the name appear anywhere in host records?
+tsa search '"MOVEit" and host.ip: *' --max-results 5 --format table
+
+# Check ALL THREE trees before deciding tagging is absent - in one message, not
+# three turns
 tsa agg host.services.software.product '"MOVEit"' -k 30
 tsa agg host.services.hardware.product '"MOVEit"' -k 30
 tsa agg host.operating_system.product '"MOVEit"' -k 30
 ```
+
+**A bare full-text seed is not host-scoped.** `"MOVEit Transfer"` on its own
+matches web-property and certificate records too, and they have no IP, no
+location and no services - so a sample of them tells you nothing about exposed
+hosts, and a count of them is not a host count. Add `and host.ip: *` when you
+search a bare string, which is what `tsa probe` does for you and prints. The tag
+tree aggregations need no such clause: bucketing a `host.*` field is host-scoped
+by the field itself.
 
 Broad seeds will pull in other products - that is expected and fine. You are
 looking for a bucket that names the product the user asked about.

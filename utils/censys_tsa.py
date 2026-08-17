@@ -31,6 +31,7 @@ import argparse
 import json
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
@@ -125,6 +126,20 @@ def run_tsa(
         tracker.start()
 
     try:
+        # The global and country counts are independent queries, so they go out
+        # together. Serially they cost two round trips plus a pacing interval for
+        # a number the user is waiting on; the gateway still applies whatever
+        # pacing the profile asks for, so this is free when pacing is off and
+        # harmless when it is not.
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            global_future = pool.submit(
+                count_hits, queries["global_tsa"], gateway, org_id, verbose
+            )
+            country_future = pool.submit(
+                count_hits, queries["country_tsa"], gateway, org_id, verbose
+            )
+            global_count = global_future.result()
+            country_count = country_future.result()
         result = {
             "product": product,
             "country": country,
@@ -132,8 +147,8 @@ def run_tsa(
                 "query": queries["platform"],
                 "url": platform_url(queries["platform"], org_id),
             },
-            "global_tsa": count_hits(queries["global_tsa"], gateway, org_id, verbose),
-            "country_tsa": count_hits(queries["country_tsa"], gateway, org_id, verbose),
+            "global_tsa": global_count,
+            "country_tsa": country_count,
             "requests_made": gateway.calls_made,
         }
     finally:

@@ -170,9 +170,26 @@ function censysCost(command: string): number {
     if (/--compare-levels/.test(command)) return 2 // doubles the cost
     return 1
   }
+  // The batching entrypoints issue one request per item, and the item count is
+  // not recoverable from a command line with any confidence - `--plan` reads a
+  // file this hook cannot see, and a repeated flag can appear any number of
+  // times. These are therefore deliberately generous flat estimates, sized so a
+  // loop that keeps batching trips the breaker rather than slipping under it.
+  if (/\btsa\s+candidates\b|censys_batch\.py candidates/.test(command)) {
+    if (/--totals/.test(command)) return 24 // 1 + 3 per candidate
+    return 16 // 1 + 2 per candidate
+  }
+  if (/\btsa\s+probe\b|censys_batch\.py probe/.test(command)) {
+    if (/--wide/.test(command)) return 9 // sample + 3 tag trees + 5 wide fields
+    return 4 // sample + the three tag trees
+  }
+  if (/\btsa\s+batch\b|censys_batch\.py batch/.test(command)) {
+    if (/--plan|\s-p\s/.test(command)) return 20 // a file we cannot read
+    return 10
+  }
   if (/\btsa\s+assess\b|censys_tsa\.py/.test(command)) return 2 // two counts
   if (/\btsa\s+search\b|censys_query\.py/.test(command)) return 1
-  return 0 // cve, credits, budget, report, ref and doc are all free
+  return 0 // cve, credits, budget, timeline, report, ref and doc are all free
 }
 
 function summarise(c: Caps): string {

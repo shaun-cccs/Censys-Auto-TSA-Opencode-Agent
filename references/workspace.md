@@ -18,6 +18,9 @@ script, a reference or a doc, and never `cd` anywhere.
 | `tsa assess` | TSA driver. Base host query and/or CVE in, platform query + global + country counts + credits out. 2 credits. |
 | `tsa agg` | Bucket a field across a query. The main fingerprint-discovery tool. Pass `--count-hosts` for host counts - the default counts nested occurrences. 1 credit per call. |
 | `tsa search` | Rate-limited Censys Platform search client. Validation and pivots. 1 credit. |
+| `tsa probe` | **Step 1 in one call**: the seed sample plus the product bucket in all three tag trees, concurrently. 4 credits (9 with `--wide`). |
+| `tsa candidates` | **Step 8b in one call**: how many hosts each candidate signal adds over the base query, and what those hosts' titles are. 1 + 2 per candidate. |
+| `tsa batch` | Any set of independent counts, samples and aggregations, run together. 1 credit each. |
 | `tsa cve` | Retrieve a CVE record from cve.org, falling back to NVD. Context only, no parsing. Free. |
 | `tsa credits` | Censys credit (token) balance and usage reporting. Free. |
 | `tsa budget` | Session credit ledger state. Free. |
@@ -27,6 +30,40 @@ script, a reference or a doc, and never `cd` anywhere.
 | `tsa doctor` | Verify the installation: dependencies, credentials, links, capability plugin. Free. |
 
 Every subcommand takes `--help`.
+
+## One turn, many calls - this is the difference between 5 minutes and an hour
+
+**A Censys call costs about a second. A turn costs tens of seconds.** Measured on
+this kit: a request plus process start is 0.7-2.6s, and a real assessment issues
+around a hundred of them. Run one per turn and the assessment takes half an hour
+of which almost none is Censys - `tsa timeline` prints that split, and the idle
+gap is normally over 90%.
+
+So the rule is: **never spend a turn on a single call when you have several
+independent calls to make.** Two ways to obey it, in order of preference:
+
+1. **A batching subcommand.** `tsa probe` does step 1's whole four-call sweep.
+   `tsa candidates` does step 8b for every candidate at once, with the title
+   evidence you need to judge them. `tsa batch` takes any mixture:
+
+   ```bash
+   tsa batch --count '<query A>' --count '<query B>' \
+             --agg host.services.port '<query A>' \
+             --sample '<query A>'
+   ```
+
+   These share one process, one connection pool and one credit ledger, so they
+   are cheaper in wall time than the same calls made separately and cost exactly
+   the same in credits.
+
+2. **Several tool calls in one message.** When the calls do not fit one
+   subcommand - different subcommands, or a query you want to see rendered its
+   own way - issue them as parallel calls in a single message rather than one per
+   turn.
+
+What must stay serial is only what is genuinely dependent: you cannot test a
+candidate against a base query you have not built yet. Everything else goes
+together.
 
 ## Query-language documentation
 
