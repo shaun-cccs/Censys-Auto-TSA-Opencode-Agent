@@ -99,16 +99,64 @@ signal you test is tested against stored Censys data, never against the target.
    research is permitted for this run and what the credit budget is. These are
    plugin-enforced - a blocked call throws - so plan around the limits rather
    than discovering them the hard way.
-1. `tsa ref workspace` - the tool commands, the shared rate-limit budget
-2. `tsa ref deep-dive` - steps 8a-8e, your main procedure
-3. `tsa ref aggregation-semantics` - **before any aggregation**
-4. `tsa ref cenql-rules` - **before writing any query**
-5. `tsa ref cve-workflow` tier 2b - **only if 8a-bis turns up a release-specific
+1. **Quick cards first, in ONE bash call.** They are about a tenth of the text and
+   carry the procedure and the commands; reach for the full reference when a
+   judgement call needs its rationale.
+
+   ```bash
+   tsa ref deep-dive --brief; tsa ref workspace --brief; tsa ref cenql-rules --brief
+   ```
+
+2. `tsa ref workspace` - the tool commands, the pacing profile, the batching rule
+3. `tsa ref deep-dive` - steps 8a-8e, your main procedure
+4. `tsa ref aggregation-semantics` - **before any aggregation**
+5. `tsa ref cenql-rules` - **before writing any query**
+6. `tsa ref cve-workflow` tier 2b - **only if 8a-bis turns up a release-specific
    artifact** (a content-hashed asset name, a cache-busting query string, a build
    ID). That is a *version* signal, not a widening signal, and tier 2b is the
    procedure for it. Do not improvise a version query, and never report "the
    version is not observable" off the back of one failed guess at an opaque
    token's format - that is a tier 3 conclusion and tier 3 has to be earned.
+
+## Your mode, and your call cap
+
+Your brief begins with a `MODE:` line. There are two, and they end differently.
+
+| MODE | Your job | Cap |
+| --- | --- | --- |
+| `family` | Hunt **one signal family** - structured protocol + service-scanner fields, favicon+title, cert+JARM, path+header, redirect+SSO, or release artifacts. Harvest, test with `tsa candidates`, return the survivors. **You do not build the widened query and you do not run `tsa assess`** - the orchestrator unions every family's survivors and counts once. | 20 calls |
+| `full` | The whole of 8a-8e yourself, including the union, the validation and the widened `tsa assess`. For a hunt small enough for one worker. | 30 calls |
+
+**If your family is `structured protocol + service-scanner fields`, start with
+`tsa agg host.services.protocol '<base query>' --count-hosts`, then read the
+sub-document behind every protocol it names with `tsa doc host --grep
+<protocol>`.** Censys stores parsed fields for the protocols it decodes -
+`any_connect.groups`, `ike.*` and their siblings - and those beat every regex the
+other five families can write, because a parsed field cannot be echoed by a host
+that merely mentions the string. This is also the family that survives honeypot
+contamination best. A port aggregation is **not** this check.
+
+You are usually one of several family workers running concurrently. **Stay in your
+family**: testing another worker's signals duplicates their spend and produces two
+answers to the same question. If a signal outside your family is too good to leave
+alone, put it in `leads` and let the orchestrator dispatch it.
+
+**The cap is a limit, not a target.** At the cap, return what you have with
+`STATUS: PARTIAL` and the unexplored ground in `leads`.
+
+## Speed rules that bind you
+
+- **Test every candidate in one call** with
+  `tsa candidates '<base>' '<c1>' '<c2>' ...` - it subtracts the base, counts the
+  increment, and buckets the incremental titles, which is the count *and* the
+  evidence you judge it by. Never one search per candidate per turn.
+- **Never issue two independent Censys calls in consecutive turns.** `tsa batch`
+  takes any mixture, including both directions of a symmetric difference.
+- **Never sleep, never poll, never wait.** Nothing runs in the background. On a
+  rate-limit error, run `tsa limits fast` and re-issue that one call.
+- **Return as soon as your family is exhausted.** More confirmation of an
+  established signal is the most expensive kind of nothing.
+
 
 ## Web research in the deep dive
 
@@ -144,7 +192,8 @@ corroborate it.
 
 - **8a** harvest signatures from the confirmed population, using the base query
   itself as the seed. `--suggest-fields`, then targeted favicon / html_title /
-  JARM / cert aggregations.
+  JARM / cert aggregations - **all in one message or one `tsa batch`**, since they
+  are independent of each other.
 - **8a-bis** hunt unique identifier strings. Rank self-identifying support and
   doc links above internal codenames. Remember SSO-fronted instances are
   invisible to title and body signals. Check what a candidate MISSES, by
@@ -153,47 +202,75 @@ corroborate it.
   product; the same asset's *content hash* identifies the release** - hand the
   latter to tier 2b (`tsa ref cve-workflow`) and report it in `notes` rather than
   `or`-ing it into the widened query.
-- **8b** test each candidate in isolation with `and not (<base query>)` and read
-  the buckets. Discard candidates whose incremental hits are incoherent.
-  **These tests are independent of each other - batch them as parallel bash
-  calls rather than running them serially.** Mind the shared rate-limit budget.
+- **8b** test the candidates with one `tsa candidates` call and read the buckets
+  it prints. Discard candidates whose incremental hits are incoherent. An
+  increment of 0 is ambiguous - `--totals` tells "already covered by the base"
+  apart from "matches nothing at all".
 - **8c** `or` the survivors onto the intact original. Prefer `=` over `:`.
+  **`MODE: family` stops before this** - return your survivors and let the
+  orchestrator union every family's at once.
 - **8d** validate the widened query, then re-run the TSA on it:
-  `tsa assess '<widened query>' --product '<Name>'`
+  `tsa assess '<widened query>' --product '<Name>'`. `MODE: full` only.
 - **8e** compute the delta against the baseline counts you were given.
+  `MODE: full` only.
 
 Never hand-add a honeypot or country clause - `tsa assess` appends both.
 
 ## Return contract - THIS IS YOUR ONLY OUTPUT
 
-You return exactly one message. Emit a short prose summary, then a single fenced
-```json block matching the `deep_dive` key of the
-`tsa report --template` schema:
+You return exactly one message: a short prose summary, then a single fenced
+```json block, then a status line as the **last line of the message**.
+
+Under `MODE: full` the block is the whole `deep_dive` key of the
+`tsa report --template` schema. Under `MODE: family` you own everything except
+`query` and `counts` - leave those null, because the union and the count belong to
+the orchestrator:
 
 ```json
 {
   "deep_dive": {
     "intro": "What was harvested and how candidates were judged.",
-    "query": "<widened base CenQL host query>",
+    "query": "<widened base CenQL host query, or null under MODE: family>",
     "counts": { "global": 0, "country": 0 },
     "signals_added": [
       { "name": "signal", "evidence": "+N incremental hosts, why it is sound" }
     ],
     "signals_rejected": [
       { "name": "candidate", "reason": "why it was discarded" }
-    ]
+    ],
+    "leads": [
+      { "id": "cert-subject", "hypothesis": "...", "seed_query": "...", "why": "..." }
+    ],
+    "calls_made": 14
   }
 }
 ```
 
+Then, as the **last line of your message**, exactly one of:
+
+```
+STATUS: DONE
+STATUS: PARTIAL <why>
+STATUS: BLOCKED <why>
+```
+
 Rules for the fragment:
 
+- `STATUS:` is `DONE`, `PARTIAL <why>` (you hit your call cap) or
+  `BLOCKED <why>` (a capability you needed was denied). It is the orchestrator's
+  only unambiguous signal that you have finished, so it is never optional and
+  always last.
 - `query` is the **base** widened query only - no honeypot clause, no country
-  clause, no URL.
-- `signals_rejected` is not optional. A rejected candidate with its reason is
-  as valuable as an accepted one, and it is the only record that the search was
-  thorough. Never return an empty rejection list unless you genuinely tested
-  nothing that failed.
-- `signals_added` evidence must carry the incremental host count.
-- In the prose above the block, state: the delta versus the baseline counts, the
+  clause, no URL. Null under `MODE: family`.
+- `signals_added` must carry the incremental host count for each signal, and
+  `signals_rejected` is not optional: a rejected candidate with its reason is as
+  valuable as an accepted one, and it is the only record that the search was
+  thorough. Mark each rejection **empirically closed** or **role judgement**, and
+  anything you never queried as *untested*, never as rejected.
+- `leads` is what you found outside your family, or had no budget for. That is
+  how the orchestrator dispatches the next wave, so do not silently drop a good
+  signal because it was not yours.
+- `calls_made` is your Censys call count, so the cap can be seen working.
+- In the prose above the block, state: the delta versus the baseline counts (or,
+  under `MODE: family`, the incremental population your survivors would add), the
   credits this hunt consumed, and your revised confidence in the total.

@@ -24,6 +24,7 @@ timeout is what catches a regression to that state.
 from __future__ import annotations
 
 import os
+import time
 import unittest
 
 from tests.helpers import BIN_TSA, opencode_available, run_agent
@@ -194,6 +195,47 @@ class CapabilityEnforcement(unittest.TestCase):
             caps=ALL_OFF,
         )
         self.assertIn("ran", out.lower(), f"--- output ---\n{out[-1500:]}")
+
+
+@unittest.skipUnless(LIVE, "set TSA_LIVE_TESTS=1 to run live agent tests")
+@unittest.skipUnless(opencode_available(), "opencode is not on PATH")
+class ParallelSubagentsOverlap(unittest.TestCase):
+    """The premise the whole fan-out design rests on.
+
+    If two task calls issued in one message did not actually overlap, spawning
+    four fingerprint workers would be no faster than the serial pass it replaced -
+    and the topology in `tsa ref leads` would be pure overhead. It is measured
+    rather than assumed: two workers each sleeping 6s were seen starting 0.48s
+    apart and overlapping for 5.5 of those 6 seconds on opencode 1.18.18.
+
+    Costs zero Censys credits: the workers run `sleep`, nothing else.
+
+    A failure here is not necessarily a regression in this kit - it can also mean
+    the runtime changed or the model chose to issue the calls one per message.
+    Either way it invalidates the design premise, so verify it by hand before
+    concluding anything.
+    """
+
+    def test_two_task_calls_in_one_message_run_concurrently(self):
+        started = time.monotonic()
+        out = run_agent(
+            "In a SINGLE message, make two parallel task calls to the general "
+            "subagent. Give each one exactly this instruction: 'Run this one bash "
+            "command and report its output verbatim, then stop: sleep 6; echo ok'. "
+            "When both return, reply with one word: done.",
+            timeout=300,
+        )
+        elapsed = time.monotonic() - started
+        self.assertIn("done", out.lower(), f"--- output ---\n{out[-1500:]}")
+        #  Serial execution costs 12s of sleep plus model latency on both sides;
+        #  concurrent execution costs 6s plus one round of latency. The threshold
+        #  is deliberately loose - this is checking for overlap, not for speed.
+        self.assertLess(
+            elapsed, 12 + 60,
+            "two 6s workers took as long as running them one after another. "
+            "Parallel task calls may no longer overlap, which invalidates the "
+            "fan-out design - verify by hand before trusting `tsa ref leads`.",
+        )
 
 
 if __name__ == "__main__":

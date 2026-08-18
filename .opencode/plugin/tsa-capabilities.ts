@@ -101,6 +101,7 @@
 import { type Plugin, tool } from "@opencode-ai/plugin"
 
 type DeepDive = "always" | "never" | "after"
+type RateLimit = "none" | "fast" | "standard"
 
 type Caps = {
   webfetch: boolean
@@ -114,6 +115,12 @@ type Caps = {
    *  or neither. `tsa run` forces this on when no file is written, because then
    *  the block is the only way it can recover the spec. */
   printSpec: boolean
+  /** How fast this run may issue Censys requests. Recorded here so it is visible
+   *  and queryable, but ENFORCED BY `tsa limits`, which persists the choice where
+   *  every subcommand in every subagent reads it. This plugin cannot enforce it:
+   *  pacing happens inside a Python process, not at the tool boundary. The
+   *  orchestrator must run `tsa limits <profile>` after registering. */
+  rateLimit: RateLimit
   /** True once tsa_capabilities action=set has run for this session. The
    *  startup interview happens before that, and must not be gated by the
    *  very flags it is asking the user to choose. */
@@ -131,6 +138,10 @@ const DEFAULTS: Caps = {
   versionBreakdown: false,
   writeReports: true,
   printSpec: false,
+  // Matches censys_limits.FALLBACK_PROFILE. Not "standard": the original pacing
+  // capped the rolling budget below what one assessment issues, so it stalled
+  // every real run. "fast" is bounded an order of magnitude above a full run.
+  rateLimit: "fast",
   registered: false,
   callBudget: null,
   callsUsed: 0,
@@ -170,9 +181,30 @@ function censysCost(command: string): number {
     if (/--compare-levels/.test(command)) return 2 // doubles the cost
     return 1
   }
+  // The batching entrypoints issue one request per item, and the item count is
+  // not recoverable from a command line with any confidence - `--plan` reads a
+  // file this hook cannot see, and a repeated flag can appear any number of
+  // times. These are therefore deliberately generous flat estimates, sized so a
+  // loop that keeps batching trips the breaker rather than slipping under it.
+  if (/\btsa\s+candidates\b|censys_batch\.py candidates/.test(command)) {
+    if (/--totals/.test(command)) return 24 // 1 + 3 per candidate
+    return 16 // 1 + 2 per candidate
+  }
+  if (/\btsa\s+probe\b|censys_batch\.py probe/.test(command)) {
+    // Keep in step with censys_batch.PROBE_TREES + PROBE_PROTOCOL + PROBE_WIDE
+    // plus the seed sample. A test derives the real count from those tuples and
+    // fails if this drifts below it, because a breaker that under-prices a
+    // command is a breaker with a hole in it.
+    if (/--wide/.test(command)) return 10 // sample + 3 trees + protocol + 5 wide
+    return 5 // sample + the three tag trees + the decoded-protocol bucket
+  }
+  if (/\btsa\s+batch\b|censys_batch\.py batch/.test(command)) {
+    if (/--plan|\s-p\s/.test(command)) return 20 // a file we cannot read
+    return 10
+  }
   if (/\btsa\s+assess\b|censys_tsa\.py/.test(command)) return 2 // two counts
   if (/\btsa\s+search\b|censys_query\.py/.test(command)) return 1
-  return 0 // cve, credits, budget, report, ref and doc are all free
+  return 0 // cve, credits, budget, timeline, report, ref and doc are all free
 }
 
 function summarise(c: Caps): string {
@@ -182,6 +214,7 @@ function summarise(c: Caps): string {
     `endpoint check : ${c.endpointValidation ? "ENABLED" : "disabled"}`,
     `deep dive      : ${c.deepDive}`,
     `version brkdwn : ${c.versionBreakdown ? "ENABLED" : "disabled"}  (advisory - not plugin-enforced)`,
+    `censys pacing  : ${c.rateLimit}  (apply it with \`tsa limits ${c.rateLimit}\` - this plugin cannot)`,
     `write reports  : ${c.writeReports}`,
     `print spec     : ${c.printSpec}`,
     `censys budget  : ${budget}`,
@@ -207,6 +240,9 @@ function fromEnv(): Caps | null {
       case "printspec": caps.printSpec = on; break
       case "deepdive":
         caps.deepDive = (["always", "never", "after"].includes(v) ? v : "never") as DeepDive
+        break
+      case "rate":
+        caps.rateLimit = (["none", "fast", "standard"].includes(v) ? v : "fast") as RateLimit
         break
       case "budget": {
         const n = Number(v)
@@ -362,6 +398,12 @@ export const TsaCapabilities: Plugin = async ({ client }) => {
             .describe("allow asking the user to run a request against a host they own (principle 7)"),
           deepDive: tool.schema.enum(["always", "never", "after"]).optional()
             .describe("'after' = ask once the baseline report is on screen; 'always' = pre-authorised; 'never' = skip"),
+          rateLimit: tool.schema.enum(["none", "fast", "standard"]).optional()
+            .describe(
+              "how fast Censys requests may be issued. NOT enforced here - after " +
+              "registering, run `tsa limits <profile>` so every subagent's calls " +
+              "pick it up. 'none' = no pacing (credits are still capped).",
+            ),
           versionBreakdown: tool.schema.boolean().optional()
             .describe(
               "produce a per-version distribution table. Off by default; on when the target " +
@@ -387,6 +429,7 @@ export const TsaCapabilities: Plugin = async ({ client }) => {
           if (args.websearch !== undefined) caps.websearch = args.websearch
           if (args.endpointValidation !== undefined) caps.endpointValidation = args.endpointValidation
           if (args.deepDive !== undefined) caps.deepDive = args.deepDive
+          if (args.rateLimit !== undefined) caps.rateLimit = args.rateLimit
           if (args.versionBreakdown !== undefined) caps.versionBreakdown = args.versionBreakdown
           if (args.writeReports !== undefined) caps.writeReports = args.writeReports
           if (args.printSpec !== undefined) caps.printSpec = args.printSpec
@@ -394,7 +437,12 @@ export const TsaCapabilities: Plugin = async ({ client }) => {
           caps.source = `interview by ${context.agent}`
           caps.registered = true
           byRoot.set(root, caps)
-          return `Capabilities registered and now enforced for every subagent in this run:\n${summarise(caps)}`
+          return (
+            `Capabilities registered and now enforced for every subagent in this run:\n${summarise(caps)}\n\n` +
+            `NEXT: run \`tsa limits ${caps.rateLimit}\` in a shell now. Pacing lives in ` +
+            `the Python tools, not at the tool boundary, so it is the only capability ` +
+            `here this plugin cannot apply for you.`
+          )
         },
       }),
     },

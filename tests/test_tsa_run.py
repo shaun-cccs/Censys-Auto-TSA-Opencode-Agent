@@ -26,6 +26,7 @@ def args(**overrides) -> argparse.Namespace:
         model=None, timeout=3600, keep_going=False, print_prompt=False,
         allow_web=False, allow_endpoint_check=False, deep_dive=False,
         budget=None, version_breakdown=False, no_reports=False, print_spec=False,
+        rate="fast",
     )
     base.update(overrides)
     return argparse.Namespace(**base)

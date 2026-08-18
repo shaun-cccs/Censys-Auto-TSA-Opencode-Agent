@@ -24,6 +24,7 @@ kit.
 | `utils/*.py` | the actual tools. Flat scripts, never imported as a package |
 | `references/*.md` | the workflow prose the agents read via `tsa ref <name>` |
 | `references/principles.md` | **source of truth** for the seven principles |
+| `references/leads.md` | **source of truth** for the fan-out protocol: leads, waves, call caps |
 | `docs/` | CenQL and queryable-field documentation, read via `tsa doc <name>` |
 | `scripts/gen_agents.py` | splices `principles.md` into all five agent prompts |
 | `scripts/parse_definitions.py` | maintainer-only: regenerates `docs/queryable_fields/` from saved Censys HTML |
@@ -64,6 +65,39 @@ user's output, not part of the kit.
    When adding a tool call to any agent prompt, ask which permission it evaluates
    and whether the answer can be `ask`. If it can, the subagent will hang, not
    fail.
+5. **No agent may sleep, poll, or wait.** Nothing in this workflow runs in the
+   background: a `task` call blocks until the worker returns and a `bash` call
+   blocks until the command exits, so a wait cannot let anything finish. Agents
+   were observed sleeping "to let queries complete", which is invisible dead time
+   inside a subagent. A rate-limit error is a *result* - report it, or raise the
+   pacing profile and re-issue the one call. Never write prose that suggests
+   waiting, and never ship a `sleep` in an example. Tests enforce this across
+   every prompt and reference.
+
+## Why a TSA used to take an hour
+
+Worth knowing before touching anything here, because it is the reason for
+`tsa probe`, `tsa candidates`, `tsa batch`, the pacing profiles and the fan-out.
+
+Measured: one Censys action costs **0.7-2.6s** end to end, including process
+start. The 90 saved specs in `reports/` record a mean of 18 fingerprint findings
+and 15.6 deep-dive signals per assessment - on the order of **100-300 API
+actions**. A hundred sub-second calls cannot take an hour.
+
+The time went into **serial agent turns**: one call per bash call, one bash call
+per turn, one turn at a time, one agent at a time. Wall clock was very nearly the
+turn count multiplied by model latency. `tsa timeline` prints the split -
+`idle gap = run span - time inside Censys` - and on an unoptimised run the idle
+gap is over 90%.
+
+Two consequences for anyone changing this kit:
+
+- **A new capability should cost turns, not calls.** Adding a mandatory check
+  that costs one credit is cheap; adding one that costs a separate *turn* is not.
+  Fold it into a batching subcommand or into an existing call.
+- **`standard` pacing is a museum piece.** Its 200-requests-per-hour rolling
+  budget is below what a single assessment issues, which is why the default
+  fallback is `fast`. Do not restore it as a default.
 
 ## The seven principles
 
@@ -166,6 +200,24 @@ enforced**. A version aggregation is produced by `tsa agg`, the same command use
 for all legitimate fingerprinting, so the plugin has no signature to block on.
 Honour it as an instruction; do not assume something will stop you.
 
+**Pacing (`rateLimit`) is carried in the capability set but enforced somewhere
+else entirely.** It is a `tsa limits` profile persisted to a state file, read by
+every Censys subcommand in every subagent - because pacing happens inside a Python
+process, not at the tool boundary the plugin can see. So:
+
+- The orchestrator must run `tsa limits <profile>` after registering. The
+  `tsa_capabilities` response says so explicitly; `tsa run` does it itself rather
+  than trusting an unattended agent to remember.
+- The fallback when nobody chooses is `fast`, matching
+  `censys_limits.FALLBACK_PROFILE`, so forgetting costs a little speed and not a
+  stalled run. A test asserts the two defaults stay in sync.
+- **Pacing is not a spend limit.** Credits are capped by `callBudget` and by
+  `CENSYS_SESSION_CREDIT_CEILING`, and measured with `tsa credits`. Turning
+  pacing off does not raise what a run may spend.
+- The profile is machine-global, like the request budget and the credit ledger.
+  Two concurrent TSAs share it - a documented trade, because a bash command
+  cannot see an opencode session id.
+
 Web research is a **corroboration tool, not a discovery tool**. In
 `censys-fingerprint` it is the documented last resort (step 3b) after Censys has
 failed to identify the product; in `censys-deepdive` it exists to verify that a
@@ -207,12 +259,33 @@ must be **known** and what goes in the file. It is not the print format.
 ```
 censys-tsa  (primary, interactive)          censys-tsa-auto  (primary, non-interactive)
   |  owns steps 4,5,6,7 + all user gates      |  same graph, question+webfetch denied
-  |  assembles the report spec                |  skips 3b, endpoint validation, step 8
+  |  recon (tsa probe), leads, waves          |  skips 3b, endpoint validation, step 8
+  |  assembles the report spec                |
   |
-  +-> censys-fingerprint  (subagent)  steps 0, 0b, 1, 2, 3, 3b
-  +-> censys-deepdive     (subagent)  step 8a-8e   [only after the user accepts]
-  +-> censys-report       (subagent)  step 9        [writes reports/<slug>.spec.json + .md]
+  +-> censys-fingerprint x N  (subagent)  one per LEAD, spawned in ONE message
+  |     MODE: recon | lead | refine      steps 0, 0b, 1, 2, 3, 3b
+  +-> censys-deepdive    x N  (subagent)  one per SIGNAL FAMILY, ditto
+  |     MODE: family (8a-8b) | full (8a-8e)   [only after the user accepts]
+  +-> censys-report           (subagent)  step 9  [writes <slug>.spec.json + .md]
 ```
+
+**Fan-out is the shape, not an optimisation to bolt on.** `tsa ref leads` is the
+protocol: 4 workers wide (6 hard ceiling), 3 waves, a Censys call cap per worker,
+`leads[]` returned for the next wave, and a `STATUS:` line as every worker's last
+line. Parallel task calls **must** go in one message - measured on opencode
+1.18.18, two workers issued together overlapped for 5.5 of 6 seconds; issued in
+separate messages they serialise, because a task call blocks until its worker
+returns.
+
+Two rules that keep fan-out from degrading quality:
+
+- **Workers report, the orchestrator decides.** Splitting the work must not split
+  the judgement. The rules that need the whole picture - measure contamination
+  before gating, symmetric difference before replacing a fingerprint - are applied
+  by the orchestrator to the merged numbers.
+- **A family worker stops before 8c.** Several workers cannot each build a union
+  and run their own `tsa assess`; the orchestrator unions the survivors and counts
+  once. `MODE: full` exists for a hunt small enough for one worker.
 
 The orchestrator is a **spec assembler**. Each subagent returns the fragment of
 `reports/<slug>.spec.json` that it owns; the orchestrator merges them and hands
@@ -221,11 +294,12 @@ the merged spec to `censys-report`. The spec schema is defined by
 
 | Spec key | Produced by |
 | --- | --- |
-| `product`, `vendor`, `summary`, `basis`, `rationale`, `sources`, `caveats` | `censys-fingerprint` |
-| `baseline.query` | `censys-fingerprint` |
+| `product`, `vendor`, `summary`, `basis`, `rationale`, `sources`, `caveats` | reconciled by the orchestrator from every `censys-fingerprint` worker |
+| `baseline.query` | reconciled by the orchestrator from the workers' candidate queries |
 | `extra_assessments` | `censys-fingerprint` (step 0b version-scoped sub-counts) |
 | `baseline.counts`, `country`, `cve`, `date`, `credits` | `censys-tsa` orchestrator |
-| `deep_dive` | `censys-deepdive` |
+| `deep_dive` | `censys-deepdive` under `MODE: full`; assembled by the orchestrator from family workers' signals |
+| `verdict`, `examples`, `leads`, `calls_made` | every worker - routing data, not report content |
 | the files on disk | `censys-report` |
 
 ## Step routing
@@ -233,7 +307,8 @@ the merged spec to `censys-report`. The spec schema is defined by
 | Step | Reference |
 | --- | --- |
 | the seven principles (already in every prompt) | `tsa ref principles` |
-| tools, prerequisites, rate limits, credentials | `tsa ref workspace` |
+| tools, pacing profiles, credentials, the batching rule | `tsa ref workspace` |
+| leads, waves, call caps, the fan-out contract | `tsa ref leads` |
 | 0 - CVE intake; 0b - version derivation, for **any** named version, CVE or not | `tsa ref cve-workflow` |
 | 1, 2, 3, 3b - probe, tagging, fingerprinting, web research | `tsa ref fingerprinting` |
 | aggregation semantics (the two knobs, bucket levels, aliases, HONEYPOT) | `tsa ref aggregation-semantics` |
@@ -243,6 +318,14 @@ the merged spec to `censys-report`. The spec schema is defined by
 | 9 - persist the investigation | `tsa ref report-spec` |
 | credit costs and measurement | `tsa ref credits` |
 | worked examples (load on demand) | `tsa ref examples` |
+
+Every reference an agent reads mid-workflow carries a **quick card** printed by
+`tsa ref <name> --brief`: the procedure and the commands, about a tenth of the
+text. Workers read cards; the full reference is for the judgement calls, and
+`--brief` falls back to the whole file where no card exists (`credits`,
+`examples`, `principles`, `report-spec`). When you add a hard-won rule to a
+reference, decide whether it belongs in the card - if a worker would get the step
+*wrong* without it, it does.
 
 ## Conventions
 

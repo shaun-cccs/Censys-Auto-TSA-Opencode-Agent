@@ -29,3 +29,9 @@ results.json
 # which for a contributor is this repo. They are somebody's output, not part of
 # the kit.
 /reports/
+
+# Scratch artifacts a contributor accumulates while working in this repo: raw
+# API responses saved with `tsa search -o`, and spreadsheets used to track
+# assessments. Ignored because `git add -A` swept them into a commit once.
+/censys_response.json
+/*.xlsx

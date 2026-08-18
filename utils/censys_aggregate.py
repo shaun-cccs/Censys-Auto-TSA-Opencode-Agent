@@ -36,27 +36,35 @@ import json
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from censys_platform import SDK, models
 
+import censys_metrics
+
 from censys_query import (
     API_REQUEST_COST,
+    BACKEND_GAVE_UP_STATUS,
     CENSYS_ORG_ID,
     get_org_id,
     DEFAULT_BUDGET_REQUESTS,
     DEFAULT_BUDGET_WINDOW,
+    DEFAULT_CONCURRENCY,
     DEFAULT_MAX_PER_MINUTE,
     DEFAULT_MIN_INTERVAL,
     DEFAULT_STATE_FILE,
     DEFAULT_TIMEOUT_MS,
     RETRYABLE_STATUS,
+    TIMEOUT_ADVICE,
+    TIMEOUT_MAX_ATTEMPTS,
     CreditCeilingError,
     RateLimitError,
     RateLimitGateway,
     charge_credits,
     get_personal_access_token,
+    is_timeout,
 )
 
 # Censys caps aggregation buckets at 2000.
@@ -130,7 +138,10 @@ def censys_aggregate(
         try:
             charge_credits(API_REQUEST_COST, query)
             gateway.acquire()
-            res = sdk.global_data.aggregate(search_aggregate_input_body=body)
+            # Timed inside the gateway: the recorded duration is the Censys
+            # round trip alone, never the rate-limit sleep before it.
+            with censys_metrics.timed("agg", query=query, field=field):
+                res = sdk.global_data.aggregate(search_aggregate_input_body=body)
             return res.result, None
         except CreditCeilingError as e:
             return None, f"credit_ceiling: {e}"
@@ -138,6 +149,11 @@ def censys_aggregate(
             return None, f"rate_limited: {e}"
         except models.SDKBaseError as e:
             status = getattr(e, "status_code", None)
+            # A 504 means the backend gave up on this aggregation. Retrying it
+            # unchanged buys four timeouts and four credits - see
+            # censys_query.TIMEOUT_MAX_ATTEMPTS.
+            if status in BACKEND_GAVE_UP_STATUS and attempt >= TIMEOUT_MAX_ATTEMPTS - 1:
+                return None, f"query_timeout status={status}: {TIMEOUT_ADVICE}"
             if status in RETRYABLE_STATUS and attempt < max_retries - 1:
                 time.sleep(base_delay * (2**attempt))
                 continue
@@ -146,6 +162,8 @@ def censys_aggregate(
                 f"msg={str(getattr(e, 'message', e))[:120]}"
             )
         except Exception as e:  # noqa: BLE001 - network/unexpected
+            if is_timeout(e) and attempt >= TIMEOUT_MAX_ATTEMPTS - 1:
+                return None, f"query_timeout: {TIMEOUT_ADVICE}"
             if attempt < max_retries - 1:
                 time.sleep(base_delay * (2**attempt))
                 continue
@@ -179,7 +197,7 @@ def _normalize_buckets(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     return buckets
 
 
-def _summarize(
+def summarize(
     payload: Dict[str, Any],
     field: str,
     query: str,
@@ -221,13 +239,14 @@ def run_aggregate(
     org_id: str = CENSYS_ORG_ID,
     token: Optional[str] = None,
     verbose: bool = False,
+    timeout_ms: int = DEFAULT_TIMEOUT_MS,
 ) -> Dict[str, Any]:
     """Aggregate a single field for a query."""
     token = token or get_personal_access_token()
     with SDK(
         organization_id=get_org_id(org_id),
         personal_access_token=token,
-        timeout_ms=DEFAULT_TIMEOUT_MS,
+        timeout_ms=timeout_ms,
     ) as sdk:
         response, error = censys_aggregate(
             sdk,
@@ -243,7 +262,7 @@ def run_aggregate(
         return {"field": field, "query": query, "buckets": [], "errors": [error]}
 
     payload = response.model_dump(mode="json", by_alias=True, exclude_none=True)
-    result = _summarize(payload, field, query, count_by_level)
+    result = summarize(payload, field, query, count_by_level)
     if verbose:
         print(f"[aggregate] {field}: {result['bucket_count']} buckets", file=sys.stderr)
         result["raw"] = payload
@@ -259,45 +278,71 @@ def run_multi_aggregate(
     count_by_level: Optional[str] = None,
     org_id: str = CENSYS_ORG_ID,
     verbose: bool = False,
+    timeout_ms: int = DEFAULT_TIMEOUT_MS,
+    concurrency: int = DEFAULT_CONCURRENCY,
 ) -> Dict[str, Any]:
-    """Aggregate several fields for the same query, reusing one SDK session."""
+    """Aggregate several fields for the same query, reusing one SDK session.
+
+    The fields are independent, so they are issued **concurrently**. This used
+    to be a serial loop, which made `--suggest-fields` thirteen round trips end
+    to end - with the default one-second pacing, thirteen seconds of wall time
+    for thirteen seconds of nothing. httpx.Client is safe to share across
+    threads, so one SDK serves them all and reuses its connection pool.
+
+    Effective parallelism is still bounded by the rate-limit gateway: pacing
+    holds its lock while it sleeps, so a profile with a min interval serialises
+    these calls by design. `tsa limits none` is what actually lets them fly.
+    Results keep the caller's field order regardless of completion order.
+    """
     token = get_personal_access_token()
-    results: List[Dict[str, Any]] = []
+    results: List[Optional[Dict[str, Any]]] = [None] * len(fields)
+
+    def one(index: int, sdk: SDK) -> None:
+        fld = fields[index]
+        response, error = censys_aggregate(
+            sdk,
+            fld,
+            query,
+            gateway,
+            number_of_buckets=number_of_buckets,
+            filter_by_query=filter_by_query,
+            count_by_level=count_by_level,
+        )
+        if error:
+            results[index] = {
+                "field": fld, "query": query, "buckets": [], "errors": [error]
+            }
+            return
+        payload = response.model_dump(mode="json", by_alias=True, exclude_none=True)
+        record = summarize(payload, fld, query, count_by_level)
+        if verbose:
+            print(
+                f"[aggregate] {fld}: {record['bucket_count']} buckets",
+                file=sys.stderr,
+            )
+        results[index] = record
 
     with SDK(
         organization_id=get_org_id(org_id),
         personal_access_token=token,
-        timeout_ms=DEFAULT_TIMEOUT_MS,
+        timeout_ms=timeout_ms,
     ) as sdk:
-        for fld in fields:
-            response, error = censys_aggregate(
-                sdk,
-                fld,
-                query,
-                gateway,
-                number_of_buckets=number_of_buckets,
-                filter_by_query=filter_by_query,
-                count_by_level=count_by_level,
-            )
-            if error:
-                results.append(
-                    {"field": fld, "query": query, "buckets": [], "errors": [error]}
-                )
-                continue
-            payload = response.model_dump(mode="json", by_alias=True, exclude_none=True)
-            record = _summarize(payload, fld, query, count_by_level)
-            if verbose:
-                print(
-                    f"[aggregate] {fld}: {record['bucket_count']} buckets",
-                    file=sys.stderr,
-                )
-            results.append(record)
+        workers = max(1, min(int(concurrency), len(fields)))
+        if workers == 1:
+            for index in range(len(fields)):
+                one(index, sdk)
+        else:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                for future in [
+                    pool.submit(one, index, sdk) for index in range(len(fields))
+                ]:
+                    future.result()  # re-raise, rather than losing the failure
 
     return {
         "query": query,
         "count_by_level": count_by_level,
         "requests_made": gateway.calls_made,
-        "aggregations": results,
+        "aggregations": [r for r in results if r is not None],
     }
 
 
@@ -495,6 +540,20 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("-o", "--output", help="Write full JSON results to this file")
     parser.add_argument("--org-id", default=CENSYS_ORG_ID, help="Censys organization ID")
+    parser.add_argument(
+        "--timeout-ms",
+        type=int,
+        default=DEFAULT_TIMEOUT_MS,
+        help="Per-request HTTP timeout; a query the backend cannot finish fails "
+             "faster and cheaper with a lower value",
+    )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=DEFAULT_CONCURRENCY,
+        help="Requests in flight when several fields are aggregated at once "
+             "(--suggest-fields). Capped in practice by the rate-limit profile",
+    )
 
     limits = parser.add_argument_group("rate limiting")
     limits.add_argument("--min-interval", type=float, default=DEFAULT_MIN_INTERVAL)
@@ -543,6 +602,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             count_by_level=args.count_by_level,
             org_id=args.org_id,
             verbose=args.verbose,
+            timeout_ms=args.timeout_ms,
+            concurrency=args.concurrency,
         )
         if args.compare_levels:
             host_level = run_multi_aggregate(
@@ -554,6 +615,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 count_by_level=COUNT_LEVEL_HOST,
                 org_id=args.org_id,
                 verbose=args.verbose,
+                timeout_ms=args.timeout_ms,
+                concurrency=args.concurrency,
             )
             result["host_level"] = host_level["aggregations"]
             result["level_comparison"] = compare_levels(

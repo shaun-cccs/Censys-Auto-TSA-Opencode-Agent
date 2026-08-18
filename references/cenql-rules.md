@@ -24,6 +24,50 @@ Shared reference. Read before writing ANY query, in any step.
 Also run `tsa doc cenql` and, for any `=~` pattern,
 `tsa doc regex`.
 
+## Quick card
+
+**Count from `host.*` only.** `web.*`, `cert.*` and tag fields are pivots.
+
+**Bind criteria to the same object.** `host.services: (port=443 and
+endpoints.http.html_title="...")`. A plain `and` of two top-level fields only
+requires both values *somewhere* on the host. Aliases (`product`, `vendor`,
+`labels`, `banner`, ...) are invalid **inside** nested queries.
+
+**`:` is tokenized and case-insensitive; `=` is exact and case-sensitive.** When
+widening with `or`, prefer `=` - a tokenized common word is the main source of
+false positives.
+
+**The four silent-zero traps.** Each returns an empty result that reads as "not
+exposed", with no error:
+
+| Trap | Wrong | Right |
+| --- | --- | --- |
+| inline regex flags | ``value=~`(?i)jetty` `` -> **0** | ``value=~`[Jj]etty` `` -> 199,548 |
+| unescaped `"` in regex | ``body=~`id="login_left"` `` -> 1 | ``body=~`id=\"login_left\"` `` -> 2,558 |
+| fieldless CIDR | `"163.127.5.0/24"` -> **0** (full-text) | `host.ip="163.127.5.0/24"` -> 8 |
+| unquoted CIDR | `host.ip=163.127.5.0/24` -> 422 | quote it, always, in every `ip_range` field too |
+
+**Any regex or CIDR query returning 0 needs a positive control before you believe
+it.** Re-run it against a population known to contain the string. If the control
+is also 0 the query is malformed, not the data. Check in order: unescaped `"`,
+inline flag, misplaced `^`/`$`, case.
+
+**A quoted HTML attribute is one of the best fingerprints available.** Bare
+`login_left` matches 36,017 generic login pages; ``id=\"login_left\"`` matches
+2,558 with a single hardware bucket. Escape before you gate.
+
+**Name a signal's role before rejecting it - disjunct, gate, or exclusion.** A
+disjunct adds hosts, so it needs **precision**. A gate adds none and only filters,
+so it needs **recall** and may be arbitrarily broad, name a third party, or
+describe another machine. "Too generic to count" and "useless as a gate" are
+different verdicts.
+
+**Regex is not metered differently** - 1 credit per API action, same as any
+search or aggregation. Twenty regex candidates cost about twenty credits. Prefer
+aggregations for precision and speed, not to save money.
+
+## The full rules
+
 ### 4. Draft the base host query
 
 Rules:

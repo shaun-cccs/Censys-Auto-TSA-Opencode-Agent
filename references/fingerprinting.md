@@ -22,6 +22,46 @@ Step -> reference file map (the skill's inline "see step N" pointers resolve her
 
 Owned by the `censys-fingerprint` subagent.
 
+## Quick card
+
+1. **Probe.** One call, not five: `tsa probe '<1-2 word seed>'`. It samples the
+   seed host-scoped, buckets `product` in **all three** tag trees -
+   `host.services.software`, `host.services.hardware`, `host.operating_system` -
+   and buckets `host.services.protocol`. Appliances are routinely absent from
+   `software` and fully tagged under `hardware`; checking one tree is the
+   commonest way to conclude "untagged" wrongly. Add `--wide` for vendors, ports,
+   titles and favicon hashes.
+2. **A bucket names the target in any tree -> step 2.** Nothing does -> step 3.
+   **A named protocol -> read its structured sub-document first**, before any
+   content regex: `tsa doc host --grep <protocol>`.
+3. **Step 2, tagging exists.** Confirm the vendor, then bind vendor and product
+   to the *same* object:
+   `host.services.software:(vendor="x" and product="y")` - never a bare
+   `product=`, which matches a host running someone else's product too. Then two
+   checks, both mandatory:
+   - read the tag's own evidence (`tsa search '<tag query>' --max-results 1
+     --format json`): a tag whose only evidence is `favicons.hash_*` is worth
+     exactly as much as a favicon, so treat it as a candidate, not a base query
+   - test for over-counting: aggregate titles and ports over
+     `<tag query> and not labels: "HONEYPOT" and not (<evidence fingerprint>)`.
+     A remainder of unrelated products means the tag is inflated - fall back to
+     step 3 and keep the tag for version enrichment only. Confirm any
+     over-counting verdict at service scope (`--count-hosts`, keep
+     `filter_by_query`) before acting on it.
+4. **Step 3, no usable tag.** Build the fingerprint from raw evidence. Sweep with
+   `tsa agg --suggest-fields '<seed>'` or target fields directly, then **invert**:
+   take the dominant favicon / title / JARM / cert organisation, use it as the
+   query, and aggregate back on product, hardware and OS to check the population
+   is coherent. Favicons: always `favicons.hash_shodan`, and **always quote the
+   value** - a leading minus 422s unquoted.
+5. **Step 3b, web research.** Last resort, capability-gated, never a way to find
+   signals you have not looked for in Censys. Never contact an assessed host.
+
+Batch the independent calls in each step; the only thing that must be serial is
+what genuinely depends on a previous answer.
+
+## The full procedure
+
 Steps 1-3 below are the discovery core. The dense aggregation-semantics
 subsections that originally sat inside step 3 are now a reference of their own:
 run `tsa ref aggregation-semantics` before any aggregation, and
@@ -50,14 +90,72 @@ CPE `part` letter tells you which tree a value belongs to: `a` = application,
 `h` = hardware, `o` = operating system.
 
 ```bash
-# 1-2 word full-text seed: does the name appear anywhere in host records?
-tsa search '"MOVEit"' --max-results 5 --format table
+# All of step 1 in ONE call: the seed sample, every tag tree, and the decoded
+# protocols, concurrently.
+tsa probe '"MOVEit"'
 
-# Check ALL THREE trees before deciding tagging is absent
+# Add vendors, ports, titles and favicon hashes when you can already tell this
+# is heading for step 3 (5 more calls):
+tsa probe '"MOVEit"' --wide
+```
+
+`tsa probe` is the preferred form because the sweep is five independent calls and
+five separate turns is where a TSA loses its time. The equivalent longhand, when
+you need to vary something it does not expose:
+
+```bash
+# 1-2 word full-text seed: does the name appear anywhere in host records?
+tsa search '"MOVEit" and host.ip: *' --max-results 5 --format table
+
+# Check ALL THREE trees before deciding tagging is absent - in one message, not
+# three turns
 tsa agg host.services.software.product '"MOVEit"' -k 30
 tsa agg host.services.hardware.product '"MOVEit"' -k 30
 tsa agg host.operating_system.product '"MOVEit"' -k 30
+
+# And the fourth layer, which is not a tag tree: what did Censys DECODE?
+tsa agg host.services.protocol '"MOVEit"' -k 30
 ```
+
+## The fourth layer - decoded protocols
+
+**Tagging and HTTP content are two evidence layers, not all of them.** Censys
+decodes a set of named service protocols and stores a **structured
+sub-document** for each one it recognises - `host.services.any_connect`,
+`host.services.ike`, and so on. Those fields outrank every banner, body and
+title regex you could write, because they are parsed values rather than strings
+that any host may echo. `tsa probe` therefore buckets
+`host.services.protocol` on every run, and when a protocol you care about
+appears you **read its sub-document before writing a content pattern**:
+
+```bash
+tsa doc host --grep any_connect
+```
+
+**A port aggregation is not this check.** Ports and protocols look
+interchangeable and are not: a port number is a guess about what is listening,
+a decoded protocol is Censys telling you what answered.
+
+**Worked failure to learn from - Cisco ASA/FTD.** An assessment ran four
+fingerprint workers across all three tag trees and five deep-dive workers across
+every HTTP/TLS/certificate signal family. It aggregated ports - including 443 and
+UDP 500 - and concluded that a large part of the population was untagged and
+reachable only through contaminated web content. Every worker missed
+`host.services.protocol="ANYCONNECT"` and its `any_connect.groups` field, where
+the single default value `DefaultWEBVPNGroup` identified **1,661 exposed VPN
+head-ends the final query did not have** - about 1,500 of them carrying no tag in
+any of the three trees. The field was documented in `tsa doc host` the whole
+time. The lesson is not "check ANYCONNECT"; it is that "no tag and no clean
+content signal" is a conclusion you may not reach until you have looked at what
+Censys decoded.
+
+**A bare full-text seed is not host-scoped.** `"MOVEit Transfer"` on its own
+matches web-property and certificate records too, and they have no IP, no
+location and no services - so a sample of them tells you nothing about exposed
+hosts, and a count of them is not a host count. Add `and host.ip: *` when you
+search a bare string, which is what `tsa probe` does for you and prints. The tag
+tree aggregations need no such clause: bucketing a `host.*` field is host-scoped
+by the field itself.
 
 Broad seeds will pull in other products - that is expected and fine. You are
 looking for a bucket that names the product the user asked about.
@@ -69,6 +167,11 @@ Interpretation:
 - All three trees are empty, generic (`nginx`, `Apache httpd`, `Microsoft IIS`),
   or unrelated -> tagging is absent or too thin. Go to step 3 and build a
   fingerprint yourself.
+- `host.services.protocol` names a protocol the product speaks -> **read that
+  protocol's structured sub-document before anything else in step 3.** This is
+  independent of the three trees: a decoded protocol on an otherwise untagged
+  host is the strongest fingerprint available, and it survives the honeypot
+  contamination that ruins body and title signals.
 
 **Worked failure to learn from - SonicWall SMA 1000.** Aggregating only
 `host.services.software.product` over `"sonicwall"` returned five buckets

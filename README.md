@@ -82,10 +82,11 @@ No uv? Install `censys-platform` into any interpreter and set
 ## Use it
 
 **Interactively** - switch to the `censys-tsa` agent in the opencode TUI and name
-a target. It opens with five questions about what it is allowed to do (web
+a target. It opens with a handful of questions about what it is allowed to do (web
 research, user-operated endpoint validation, the deep dive, a credit budget,
-report output), then runs the assessment, delegating fingerprinting, the
-signature hunt and report writing to its own subagents.
+report output, request pacing), then runs the assessment - reconnoitring the
+target itself and fanning the discovery work out across several subagents that
+run at the same time.
 
 ```
 @censys-tsa Ivanti EPMM
@@ -99,6 +100,7 @@ signature hunt and report writing to its own subagents.
 tsa run "Ivanti EPMM"
 tsa run --cve CVE-2024-21762 --country Australia
 tsa run --allow-web --deep-dive --budget 50 "Flowise"
+tsa run --rate none "Flowise"          # no request pacing at all
 ```
 
 Reports are written to `./reports/` in **the directory you run from**, so
@@ -112,13 +114,38 @@ Everything the agents use is available to you directly:
 | `tsa assess <query>` | global + country counts for a base query | 2 |
 | `tsa search <query>` | rate-limited host search, for validating a query | 1 |
 | `tsa agg <field> <query>` | bucket a field across a query - the fingerprint tool | 1 |
+| `tsa probe <seed>` | the whole first-pass sweep in one call: seed sample, all three tag trees, decoded protocols | 5 |
+| `tsa candidates <base> <c>...` | per candidate signal, the hosts it adds over the base and what they look like | 1 + 2 each |
+| `tsa batch --count/--sample/--agg` | any set of independent calls, run together | 1 each |
 | `tsa cve <CVE-ID>` | fetch a CVE record from cve.org, falling back to NVD | 0 |
 | `tsa credits balance` | credit balance and usage | 0 |
+| `tsa limits [none\|fast\|standard]` | how fast Censys requests may be issued | 0 |
+| `tsa timeline` | where a run's wall-clock time went | 0 |
 | `tsa report <spec.json> -o <out.md>` | render a report from a spec | 0 |
-| `tsa ref [name]` | the workflow references the agents read | 0 |
+| `tsa ref [name] [--brief]` | the workflow references the agents read | 0 |
 | `tsa doc host --grep favicon` | CenQL and queryable-field documentation | 0 |
 
 `tsa help` lists them all; every subcommand takes `--help`.
+
+## Speed
+
+An assessment issues 100-300 Censys API actions. Each one takes about a second,
+so the work itself is a couple of minutes; everything else is the agent thinking
+between calls. Three things keep that from dominating:
+
+- **Independent calls go out together.** `tsa probe`, `tsa candidates` and
+  `tsa batch` each do in one call what used to take four, twenty or arbitrarily
+  many separate ones.
+- **Independent hypotheses go out together.** The orchestrator reconnoitres the
+  target, derives leads from what it sees, and runs four fingerprinting subagents
+  concurrently, each with a hard cap on how many queries it may spend.
+- **Pacing is a choice, not a default.** `tsa limits none` removes it entirely;
+  credits stay capped separately. The old default paced every request by a second
+  and allowed 200 an hour - less than one assessment needs.
+
+`tsa timeline` shows the split for the last run: time spent inside Censys versus
+idle gap. If the idle gap is over 90%, the run was waiting on agent turns rather
+than on Censys.
 
 ## What it will not do
 
@@ -149,7 +176,10 @@ session on your machine.
 Censys calls cost credits: 1 for a search or an aggregation, 2 for an
 assessment. The agents **measure** real spend rather than estimating it, and
 report it on every assessment. `--budget N` is a coarse circuit-breaker against a
-runaway loop, not an accountant.
+runaway loop, not an accountant. Running discovery in parallel costs somewhat more
+than running it serially - several hypotheses get tested that a serial pass would
+have abandoned - so every subagent has a hard cap on the queries it may spend, and
+the budget is the backstop.
 
 Counts always come from `host.*` queries, honeypots are always excluded, and the
 report says which of these the number is:
@@ -166,7 +196,7 @@ query.
 
 ## Contributing
 
-See `AGENTS.md` for the layout, the design decisions and the four absolute rules
+See `AGENTS.md` for the layout, the design decisions and the five absolute rules
 for anything user-facing. Tests:
 
 ```bash

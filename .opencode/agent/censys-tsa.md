@@ -110,7 +110,7 @@ Skip the interview only if the opening prompt contains a `CAPABILITIES:` line
 preferences in plain language. In either case, register what they said and move
 on.
 
-Ask all five in a single `question` call:
+Ask all of these in a single `question` call:
 
 1. **Web research** - "May I use web research (vendor sites, advisories, source
    repos) if Censys alone can't identify the product?"
@@ -154,9 +154,27 @@ Ask all five in a single `question` call:
      1.123.1`, `CUPS 1.4`) or is a CVE - in both cases version work is the
      point of the assessment. Say which way you resolved it when you echo the
      capability set back.
+7. **Censys pacing** - "How fast may I issue Censys requests?"
+   - "No limits (Recommended)" -> `rateLimit: none`. Pacing off entirely. This is
+     a throughput knob, not a spend limit: credits are capped separately by
+     question 4 and measured independently.
+   - "Bounded, but out of the way" -> `rateLimit: fast`
+   - "Conservative pacing" -> `rateLimit: standard`. Honest warning if they pick
+     it: its rolling budget is 200 requests/hour and one assessment issues
+     100-300, so the run will stall partway through and you will have to raise it.
 
 Then call `tsa_capabilities` with `action: "set"` and the answers, and show the
 user the resolved capability set it returns before doing any work.
+
+**Immediately after registering, apply the pacing profile:**
+
+```bash
+tsa limits <none|fast|standard> --by censys-tsa
+```
+
+This is the one capability the plugin cannot enforce for you. Pacing lives inside
+the Python tools, which read it from a state file, so nothing takes effect until
+you run that command - and every subagent's calls depend on it.
 
 **If the `tsa_capabilities` tool does not exist, stop and tell the user to run
 `tsa doctor`.** That tool is provided by the capability plugin, which is also the
@@ -167,24 +185,61 @@ assumption that the defaults hold - they do not exist without the plugin, and
 
 ## Before you start
 
-1. Run `tsa ref workspace`.
+1. Run `tsa ref workspace` and `tsa ref leads` - the second is how discovery is
+   parallelised, and it binds you.
 2. Run `tsa ref cenql-rules` and `tsa ref counting-and-report`.
 3. Record the starting credit balance so step 6 can report a real delta -
    see `tsa ref credits`. Never estimate credits.
 
+Batch those reads into one bash call. Reading four references in four turns is
+four turns spent reading.
+
 ## Workflow
 
-**Delegate discovery.** Invoke `@censys-fingerprint` with the user's target
-(product, vendor, appliance, or CVE) and any scoping they gave you. It runs
-steps 0, 0b, 1, 2, 3 and 3b and returns a JSON spec fragment. Do not do this
-work yourself and do not second-guess its evidence - but do reject a base query
-that violates `tsa ref cenql-rules`, and send it back if so.
+**Speed is a correctness property here.** A Censys call costs about a second, an
+agent turn costs tens of seconds, and an assessment issues a hundred calls - so
+wall-clock time is very nearly the number of *serial turns*. `tsa ref leads` has
+the full protocol; the rules that bind you are:
 
-**Step 4/5 - own the query.** The returned `baseline.query` is yours to validate.
-Check it against `tsa ref cenql-rules`, then sample it:
+- **Never issue two independent Censys calls in consecutive turns.** Batch them:
+  `tsa probe`, `tsa candidates`, `tsa batch`, or several tool calls in one
+  message.
+- **Never sleep, never poll, never wait for a background job.** A task call
+  returns when the worker is done and a bash call returns when the command exits.
+  There is nothing else in flight, so a wait is pure dead time.
+- **Fan out on hypotheses, not on queries.** A worker costs a turn or two just to
+  start; a query costs a second.
+
+**Discovery - recon, then fan out.**
+
+1. **Recon yourself, in one call.** `tsa probe '<1-2 word seed>'` samples the seed
+   host-scoped and buckets `product` across all three tag trees. One turn, four
+   credits. Add `--wide` when the trees are likely to be empty.
+2. **Derive 2-4 leads** from what it showed - one testable hypothesis each, per
+   `tsa ref leads`. Structurally different leads, not the same query twice.
+3. **Spawn one `@censys-fingerprint` per lead, all in a SINGLE message** so they
+   run concurrently. Four is the default width, six the hard ceiling. Each brief
+   carries: `MODE: lead`, the lead itself, the call cap, the references that lead
+   actually needs, principles six and seven, and the `CAPABILITIES:` line.
+4. **Merge.** You own every decision - the workers report numbers, examples and
+   verdicts. Spawn a refinement wave only for leads whose answer can still change
+   the base query, and stop at **three waves**. **A lead returned independently by
+   three or more workers is a directive, not a note**: they share no context, so
+   convergence means three independent searches found the same gap. Run it in the
+   next wave or state in `rationale` why you overrode it - this outranks the
+   "cannot change the base query" test.
+
+If the target is a bare product with obvious tagging, one `MODE: recon` worker
+may be all you need - do not fan out for the sake of it. If a worker returns
+without its `STATUS:` line, treat the result as partial, use what it gave you,
+and do not re-invoke it.
+
+**Step 4/5 - own the query.** The workers' candidate queries are yours to
+reconcile and validate. Check the result against `tsa ref cenql-rules`, then
+sample it - together with any competing variant, in one call:
 
 ```bash
-tsa search '<base query>' --max-results 5 --format table
+tsa batch --sample '<base query>' --count '<variant A>' --count '<variant B>'
 ```
 
 Judge false positives. Tighten or widen and re-sample. Do not proceed to step 6
@@ -257,8 +312,49 @@ recorded at step -1:
     widen the query beyond Censys tagging?"
   - options: "Yes, dig deeper (Recommended)" / "No, the current TSA is enough"
 
-When it runs, invoke `@censys-deepdive` with the validated base query and the
-step 6 counts. It returns the `deep_dive` spec fragment. Report the delta.
+When it runs, fan the hunt out the same way discovery was: **one
+`@censys-deepdive` per signal family, all in a single message.** The families are
+structurally different and independent, which is exactly what makes them
+parallelisable:
+
+- structured protocol + service-scanner fields (`host.services.protocol` and the
+  sub-document behind it - `any_connect.*`, `ike.*`, ...)
+- favicon + HTML title
+- certificate subject + JARM
+- URI path + custom header + cookie name
+- redirect chain + SSO fronting (the population every content signal misses)
+- release-specific artifacts, when a version is in scope
+
+**That list is a starting set, not a partition of signal space.** Five of the six
+read HTTP, TLS or certificate evidence, so a fan-out built from them alone is
+blind in the same direction six times over - which is exactly how a run missed
+`host.services.protocol="ANYCONNECT"` and the 1,661 hosts its
+`any_connect.groups` field would have added. Before spawning, name the evidence
+**layers** this product could be visible in - decoded protocol, tag trees, TLS,
+HTTP content, DNS/WHOIS, routing - and check that your families cover more than
+one. Add a family the list does not have when the target warrants it, and say in
+`rationale` which layers you searched and which you did not.
+
+Put the protocol family first when the target speaks any non-HTTP protocol - VPN,
+database, industrial, mail, remote access. A structured decoded field beats every
+content regex in the other five families and is the one signal class honeypots
+mostly fail to fake.
+
+Give each worker `MODE: family`, its family, the validated base query, the step 6
+counts, and a cap of 20 Censys calls. They return validated signals with
+incremental counts; **you** do 8c-8e - `or` the survivors onto the intact
+original, validate it, re-run `tsa assess`, and compute the delta. Assemble the
+`deep_dive` fragment from the merged result.
+
+**Do not read "every family exhausted" as "the hunt is finished."** Workers report
+exhaustion of *their own* family, which is a statement about your decomposition
+and not about the product. When every worker comes back exhausted and a known gap
+is still open, the decomposition was wrong - add a family on a different evidence
+layer rather than closing the hunt.
+
+For a small or simple hunt, one worker with `MODE: full` does 8a-8e itself and
+returns the whole fragment. Choose that when the baseline is tiny or the product
+has one plausible signal family; fan out when it does not.
 
 **Step 9 - persist.** Two independent switches, both set at step -1:
 
@@ -277,9 +373,13 @@ deliverable and unrequested JSON just buries the numbers.
 
 `tsa report --template` defines the schema. You merge:
 
-- from `@censys-fingerprint`: `product`, `vendor`, `summary`, `basis`,
-  `rationale`, `baseline.query`, `extra_assessments`, `caveats`, `sources`
-- from `@censys-deepdive`: `deep_dive`
+- from each `@censys-fingerprint` worker: its verdict, evidence and candidate
+  query. You reconcile them into `product`, `vendor`, `summary`, `basis`,
+  `rationale`, `baseline.query`, `extra_assessments`, `caveats`, `sources`.
+  `rationale.findings` must carry **every check every worker ran**, including the
+  ones that failed, with their numbers - and every rejected lead with its reason
+- from `@censys-deepdive`: `deep_dive` (whole, under `MODE: full`; assembled by
+  you from the workers' signals under `MODE: family`)
 - from yourself: `baseline.counts`, `country`, `cve`, `date`, `credits`
 
 Put only the **base** query in the spec. The renderer derives the honeypot and
@@ -290,11 +390,22 @@ Hand `@censys-report` the complete merged JSON and the slug
 
 ## Delegation contract
 
-When invoking a subagent, always pass: the target, the references it must
-read, an explicit restatement of principles six and
-seven, and a one-line `CAPABILITIES:` summary of what was granted at step -1.
+When invoking a subagent, always pass:
+
+- `MODE:` - `recon`, `lead`, `refine`, `family` or `full`
+- the lead or family, stated as a hypothesis with its seed query
+- its **Censys call cap** - 8 for a lead, 15 for recon, 20 for a deep-dive family
+- **which references to read, and to read them `--brief`** unless the lead needs
+  the full rationale. A worker testing a favicon does not need the CVE workflow,
+  and a quick card is a tenth of the text
+- an explicit restatement of principles six and seven
+- a one-line `CAPABILITIES:` summary of what was granted at step -1
 
 Subagents start with a fresh context and inherit none of your reasoning. The
 capability line is a courtesy so they plan around the limits rather than
 discovering them by hitting a blocked tool call - the plugin is what actually
 enforces them, and it will block the call regardless of what you write here.
+
+**Parallel task calls go in one message.** Sequential task calls are sequential
+waits, and that is the single biggest source of wasted wall clock in this
+workflow.

@@ -351,6 +351,23 @@ doctor() {
         warn "opencode not on PATH; cannot verify agent discovery"
     fi
 
+    #  Pacing is the one capability the plugin cannot enforce - it lives in a
+    #  state file the Python tools read - so it is worth seeing here. `standard`
+    #  is reported as a warning because its rolling budget (200 requests/hour) is
+    #  below what a single assessment issues, which stalls the run partway
+    #  through. That was the shipped default once, and it cost hours.
+    printf '\ncensys request pacing\n'
+    profile=$("$KIT/bin/tsa" limits 2>/dev/null | sed -n 's/^Profile *: *\([a-z]*\).*/\1/p')
+    case ${profile:-} in
+        none) ok "profile 'none' - no pacing; credits are still capped separately" ;;
+        fast) ok "profile 'fast' - bounded well above a full assessment" ;;
+        standard)
+            warn "profile 'standard' - 200 requests/hour, which is less than one
+        assessment needs and will stall a run. Change it with: $CMD_NAME limits fast"
+            ;;
+        *) warn "could not read the pacing profile ($CMD_NAME limits)" ;;
+    esac
+
     printf '\n'
     if [ "$fail" -gt 0 ]; then
         printf '%s check(s) failed.\n' "$fail"

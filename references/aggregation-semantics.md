@@ -20,6 +20,39 @@ Step -> reference file map (the skill's inline "see step N" pointers resolve her
 
 # Aggregation semantics - verified reference
 
+## Quick card
+
+**A bucket count is uninterpretable until you know both knobs.**
+
+| What you want | Flags |
+| --- | --- |
+| "how many hosts have this value **anywhere** on them" | `--count-hosts --no-filter-by-query` |
+| "how many hosts have it **on the service that matched**" | `--count-hosts` |
+| occurrences, not hosts (the API default) | neither |
+
+- Default level counts service/endpoint/software **occurrences**, and the
+  inflation is large: `software.vendor` over 16,134 hosts returned
+  `cisco: 35,774`. Never quote a default-level bucket as a host count.
+- `--count-hosts` with the filter on is the high-leverage form: it reproduces
+  `host.services:(<constraint> and <field>=<value>)` for **every bucket key at
+  once, for one credit**. Reach for it before writing a loop of searches -
+  measured, the unbound form said 13,312 hosts where the service-bound form said
+  1,760.
+- Buckets legitimately sum to more than the population even at host level: one
+  host holds several ports.
+- **Aliases (`product`, `vendor`, `labels`, ...) work in the query, not in the
+  `field` parameter.** Use the full path for `field`.
+- **0 buckets does not mean the field is empty.** Run a positive control before
+  believing it.
+- **`HONEYPOT` is a SERVICE label, not a host label**, and honeypot exclusion is
+  Censys's job - `tsa assess` appends `not labels: "HONEYPOT"` itself. Never
+  build bespoke honeypot detection, and never hand-add the clause.
+
+Every number in this file was measured. Where it corrects an earlier version of
+the workflow, trust the correction.
+
+## The full reference
+
 These four subsections are children of "step 3. No usable tag - get creative
 inside Censys" (`tsa ref fingerprinting`), but they are shared reference
 consumed by steps 0b, 2, 3, 6 and 8. Read them before running any aggregation.

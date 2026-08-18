@@ -141,17 +141,43 @@ run_stdlib() {
 
 cmd_ref() {
     if [ $# -eq 0 ]; then
-        printf 'Workflow references (use: tsa ref <name>)\n\n'
+        printf 'Workflow references (use: tsa ref <name> [--brief])\n\n'
         for f in "$REFERENCES"/*.md; do
             name=$(basename "$f" .md)
             printf '  %-24s %s\n' "$name" "$(sed -n 's/^# //p' "$f" | head -1)"
         done
+        printf '\n--brief prints just the quick card: the procedure and the commands,\n'
+        printf 'without the worked cases. Start there; read the full text when a step\n'
+        printf 'is ambiguous or a judgement call needs its rationale.\n'
         return 0
     fi
     name=$1
+    shift
     file="$REFERENCES/$name.md"
     [ -f "$file" ] || die "no such reference: $name (try: tsa ref)"
-    cat "$file"
+
+    case ${1:-} in
+        --brief | -b)
+            #  A worker with one hypothesis to test does not need 25KB of worked
+            #  cases in its context on every subsequent turn - it needs the
+            #  procedure and the commands. The full text stays one call away.
+            brief=$(awk '
+                /^## Quick card/ { inside=1; print; next }
+                inside && /^## / { exit }
+                inside { print }
+            ' "$file")
+            if [ -n "$brief" ]; then
+                printf '%s\n' "$brief"
+                printf '\nFull reference: tsa ref %s\n' "$name"
+            else
+                #  No card written yet: print everything rather than nothing.
+                printf 'tsa: %s has no quick card; printing it in full\n\n' "$name" >&2
+                cat "$file"
+            fi
+            ;;
+        "") cat "$file" ;;
+        *) die "unexpected argument: ${1} (only --brief is supported)" ;;
+    esac
 }
 
 # --------------------------------------------------------------- doc (CenQL)
@@ -237,11 +263,27 @@ Censys queries (need uv + the censys-platform SDK, cost credits):
                           Rate-limited host search. Validation and pivots. 1 credit.
   tsa agg <field> <query> [-k N] [--count-hosts] [--compare-levels]
                           Bucket a field across a query. The fingerprint tool. 1 credit.
+  tsa probe <seed> [--wide]
+                          Step 1 in ONE call: full-text sample, the product
+                          bucket in all three tag trees, and the decoded
+                          protocol bucket. 5 credits (10 with --wide).
+  tsa candidates <base> <cand>... [--totals]
+                          Step 8b in ONE call: incremental hosts each candidate
+                          adds over the base, with the titles of those hosts.
+                          1 + 2 per candidate.
+  tsa batch [--count Q]... [--sample Q]... [--agg FIELD Q]... [-p plan.json]
+                          Any set of independent calls, run together. 1 each.
   tsa credits balance | usage [--granularity daily|monthly]
                           Credit balance and usage. Free.
   tsa budget              Session credit ledger state. Free.
 
 Offline (standard library only, no uv, no credits):
+  tsa limits [none|fast|standard|clear]
+                          How fast this machine may issue Censys requests. No
+                          argument shows what is in force and where it came from.
+  tsa timeline [--since S] [--all] [-f json]
+                          Where a run's wall-clock time went: time inside Censys
+                          versus idle gap. Read this before optimising anything.
   tsa cve <CVE-ID> [--single] [-f json]
                           Retrieve a CVE record from cve.org, falling back to NVD.
   tsa report --template   Print the report spec schema.
@@ -252,7 +294,9 @@ Offline (standard library only, no uv, no credits):
                           writes ./reports/<slug>.spec.json in the current dir.
 
 Documentation, shipped with the kit:
-  tsa ref [name]          Workflow references. No argument lists them.
+  tsa ref [name] [--brief]
+                          Workflow references. No argument lists them; --brief
+                          prints just the procedure and the commands.
   tsa doc [name] [--grep PATTERN]
                           CenQL and queryable-field docs. No argument lists them.
 
@@ -283,8 +327,13 @@ case $command in
     assess) run_dep censys_tsa.py "$@" ;;
     search) run_dep censys_query.py "$@" ;;
     agg | aggregate) run_dep censys_aggregate.py "$@" ;;
+    batch) run_dep censys_batch.py batch "$@" ;;
+    probe) run_dep censys_batch.py probe "$@" ;;
+    candidates) run_dep censys_batch.py candidates "$@" ;;
     credits) run_dep censys_credits.py "$@" ;;
     budget) run_dep censys_session_budget.py "$@" ;;
+    timeline) run_stdlib censys_metrics.py "$@" ;;
+    limits) run_stdlib censys_limits.py "$@" ;;
     cve) run_stdlib cve_lookup.py "$@" ;;
     report) run_stdlib tsa_report.py "$@" ;;
     run) run_stdlib tsa_run.py "$@" ;;
