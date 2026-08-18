@@ -43,6 +43,13 @@ user's output, not part of the kit.
    Everything goes through `tsa` subcommands - including reading this kit's own
    documentation, which is what `tsa ref` and `tsa doc` are for. Tests enforce
    this.
+
+   The single exception is a **permission pattern** in agent frontmatter, which
+   is config addressed to opencode's matcher and never prose read by a model:
+   `censys-tsa` allows `edit` under `/tmp/opencode/*`. That path is opencode's
+   own scratch directory, identical on every machine, so it freezes no install
+   location and resolves against nothing. Prose stays bound by the ban - if you
+   want a path in a sentence, what you actually want is a `tsa` subcommand.
 2. **No `python`, no `pip`.** There is no `python` on many machines, and `pip
    install` would hit the wrong interpreter. `bin/tsa` decides how to run things:
    uv for the Censys SDK subcommands, bare `python3` for the standard-library
@@ -61,6 +68,12 @@ user's output, not part of the kit.
      from the home directory, on a prompt nothing could answer. State files are
      reached through `tsa budget` and `tsa credits`, never by path - which rule 1
      already required.
+
+     `/tmp/opencode` is the exception, because opencode's built-in agent
+     defaults already resolve `external_directory` to `allow` there. It is the
+     one place outside the workspace an agent can touch without risking that
+     prompt - useful for scratch files, useless for anything that must survive
+     the run.
 
    When adding a tool call to any agent prompt, ask which permission it evaluates
    and whether the answer can be `ask`. If it can, the subagent will hang, not

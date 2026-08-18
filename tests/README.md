@@ -23,7 +23,7 @@ packaged the way it is.
 | --- | --- | --- |
 | `test_portability.py` | no | no paths or interpreters in shipped prose, principles in sync, plugin scope, the `tsa` dispatch table, `tsa ref`/`tsa doc` coverage, the skill, `install.sh` against a throwaway HOME |
 | `test_tsa_run.py` | no | slugs, version-breakdown decisions, capability serialisation, prompt building, spec recovery, CLI |
-| `test_agent_config.py` | no | agent frontmatter, resolved permissions, plugin source invariants, budget costs, the endpoint-probe gate |
+| `test_agent_config.py` | no | agent frontmatter, resolved permissions, who may write files, plugin source invariants, budget costs, the endpoint-probe gate |
 | `test_speed.py` | no | the speed subsystem: call timing (`tsa timeline`), where instrumentation sits, the batching engine, rate-limit profiles, ledger locking |
 | `test_fanout.py` | no | the fan-out topology: the lead protocol, call caps, the `STATUS:` completion signal, "never sleep", quick cards |
 | `test_censys_credits.py` | no | credit tracking maths (skips without the SDK) |

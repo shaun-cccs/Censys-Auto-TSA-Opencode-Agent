@@ -126,6 +126,68 @@ class Frontmatter(unittest.TestCase):
             "allow",
         )
 
+    def test_the_interactive_orchestrator_still_asks_before_writing(self):
+        """Writes into the user's own project must stay visible.
+
+        This agent runs inside somebody else's repository, so its edits land on
+        files the user owns. The catch-all stays `ask`; only opencode's scratch
+        directory is carved out (below).
+        """
+        edit = (frontmatter("censys-tsa").get("permission", {}) or {}).get("edit")
+        self.assertIsInstance(edit, dict, "censys-tsa edit must be a pattern map")
+        self.assertEqual(
+            edit.get("*"), "ask",
+            "the catch-all must stay 'ask': an unprompted write into the user's "
+            "project is exactly what this permission exists to prevent.",
+        )
+
+    def test_scratch_writes_are_not_prompted(self):
+        """opencode's own temp directory is exempt, and must stay exempt.
+
+        `edit` and `write` assert two permissions in order: `external_directory`
+        first, then `edit`. opencode's built-in agent defaults already allow
+        `<tmp>/*` for the former, so the `edit` gate was the only thing left
+        prompting on a scratch file - a prompt that protects nothing the user
+        owns.
+
+        The pattern must be absolute: for a path outside the workspace the
+        resource matched against `edit` patterns is the canonical absolute path,
+        not a workspace-relative one. A single `*` suffices because the matcher
+        compiles it to `.*` with the `s` flag, so it spans `/`.
+        """
+        edit = (frontmatter("censys-tsa").get("permission", {}) or {}).get("edit")
+        self.assertIsInstance(edit, dict, "censys-tsa edit must be a pattern map")
+        scratch = {
+            pattern: action for pattern, action in edit.items()
+            if pattern.startswith("/tmp/")
+        }
+        self.assertTrue(
+            scratch, "no scratch-directory carve-out: a write to opencode's own "
+            "temp directory would prompt again",
+        )
+        for pattern, action in scratch.items():
+            with self.subTest(pattern=pattern):
+                self.assertEqual(action, "allow")
+                self.assertTrue(
+                    pattern.startswith("/tmp/opencode/"),
+                    f"{pattern!r} reaches beyond opencode's own scratch "
+                    "directory; keep the carve-out to that one path",
+                )
+
+    def test_the_fingerprint_and_deepdive_workers_write_nothing(self):
+        """Only censys-report puts a file on disk.
+
+        These two return spec fragments to the orchestrator, which merges them.
+        A worker that can write is a worker that can invent its own artifact
+        alongside the real one.
+        """
+        for agent in ["censys-fingerprint", "censys-deepdive"]:
+            with self.subTest(agent=agent):
+                self.assertEqual(
+                    (frontmatter(agent).get("permission", {}) or {}).get("edit"),
+                    "deny",
+                )
+
     def test_task_delegation_is_scoped(self):
         for agent in ORCHESTRATORS:
             with self.subTest(agent=agent):

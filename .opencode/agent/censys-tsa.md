@@ -7,7 +7,14 @@ permission:
   read: allow
   glob: allow
   grep: allow
-  edit: ask
+  # `ask` on `*` is deliberate: this agent writes into the user's own project,
+  # and every such write should be seen. opencode's own scratch directory is a
+  # different matter - the built-in agent defaults already allow it for
+  # `external_directory`, and an edit there touches nothing the user owns, so a
+  # second prompt buys nothing. The specific pattern wins over the catch-all.
+  edit:
+    "*": ask
+    "/tmp/opencode/*": allow
   question: allow
   # `webfetch`/`websearch` are "allow" here, not "ask", and the tsa-capabilities
   # plugin is the only gate: its tool.execute.before hook throws on a call the
