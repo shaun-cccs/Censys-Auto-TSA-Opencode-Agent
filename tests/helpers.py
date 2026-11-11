@@ -31,7 +31,8 @@ SKILL_MD = Path(
 )
 
 AGENT_DIR = ROOT / ".opencode" / "agent"
-PLUGIN_TS = ROOT / ".opencode" / "plugin" / "tsa-capabilities.ts"
+PLUGIN_TS = ROOT / "plugins" / "v1" / "tsa-capabilities.ts"
+PLUGIN_V2_TS = ROOT / "plugins" / "v2" / "tsa-capabilities" / "index.ts"
 SKILL_DIR = ROOT / ".opencode" / "skill" / "censys-tsa"
 REFERENCES = ROOT / "references"
 BIN_TSA = ROOT / "bin" / "tsa"
@@ -127,6 +128,19 @@ def opencode_available() -> bool:
     return shutil.which("opencode") is not None
 
 
+def opencode_major() -> int:
+    """Major version of the opencode on PATH (1 when unreadable)."""
+    out = subprocess.run(
+        ["opencode", "--version"], capture_output=True, text=True, timeout=60
+    ).stdout
+    match = re.search(r"(\d+)\.\d+\.\d+", out)
+    return int(match.group(1)) if match else 1
+
+
+# OpenCode 2 renamed these permission actions. The tests use the V1 names.
+V2_ACTION_NAMES = {"shell": "bash", "subagent": "task"}
+
+
 def resolved_permissions() -> Dict[str, Dict[str, str]]:
     """Ask opencode for each agent's *resolved* permissions.
 
@@ -135,9 +149,26 @@ def resolved_permissions() -> Dict[str, Dict[str, str]]:
     Testing the resolved view is what catches a config that silently loses to
     a higher-precedence rule.
 
-    Returns ``{agent: {permission: action}}`` for wildcard patterns only.
+    Returns ``{agent: {permission: action}}`` for wildcard patterns only, with
+    OpenCode 2 action names mapped back to their V1 names.
     """
     import json
+
+    if opencode_major() >= 2:
+        out = subprocess.run(
+            ["opencode", "api", "get", f"/api/agent?location[directory]={ROOT}"],
+            cwd=ROOT, capture_output=True, text=True, timeout=120,
+        ).stdout
+        result: Dict[str, Dict[str, str]] = {}
+        for agent in json.loads(out or "{}").get("data", []):
+            perms: Dict[str, str] = {}
+            # V2 rules are ordered and the last match wins.
+            for rule in agent.get("permissions", []):
+                if rule.get("resource") == "*":
+                    action = V2_ACTION_NAMES.get(rule["action"], rule["action"])
+                    perms[action] = rule["effect"]
+            result[agent["id"]] = perms
+        return result
 
     out = subprocess.run(
         ["opencode", "agent", "list"],
@@ -147,7 +178,7 @@ def resolved_permissions() -> Dict[str, Dict[str, str]]:
         timeout=120,
     ).stdout
 
-    result: Dict[str, Dict[str, str]] = {}
+    result = {}
     blocks = re.split(r"^(\S+) \((primary|subagent|all)\)$", out, flags=re.M)
     for i in range(1, len(blocks), 3):
         name = blocks[i]
@@ -252,14 +283,16 @@ def run_agent(prompt: str, agent: str = "build", caps: Optional[str] = None,
     else:
         env.pop("TSA_CAPABILITIES", None)
 
+    cmd = ["opencode", "run", "--agent", agent]
+    # OpenCode 2 has no --dir, and only a private server inherits
+    # TSA_CAPABILITIES; see utils/tsa_run.py.
+    cmd += ["--standalone"] if opencode_major() >= 2 else ["--dir", str(ROOT)]
+    if os.environ.get("TSA_TEST_MODEL"):
+        cmd += ["--model", os.environ["TSA_TEST_MODEL"]]
+    cmd += ["--auto", prompt]
+
     proc = subprocess.run(
-        [
-            "opencode", "run",
-            "--agent", agent,
-            "--dir", str(ROOT),
-            "--auto",
-            prompt,
-        ],
+        cmd,
         cwd=ROOT,
         capture_output=True,
         text=True,

@@ -23,6 +23,7 @@ import unittest
 from pathlib import Path
 
 from tests.helpers import (
+    PLUGIN_V2_TS,
     AGENT_DIR,
     AGENTS,
     BIN_TSA,
@@ -206,6 +207,35 @@ class PluginScope(unittest.TestCase):
         match = re.search(r"const INTERNAL_AGENTS = new Set\(\[(.*?)\]\)", self.source, re.S)
         self.assertIsNotNone(match)
         self.assertIn("title", re.findall(r'"([^"]+)"', match.group(1)))
+
+
+class PluginVersionsAgree(unittest.TestCase):
+    """OpenCode 1 and 2 need separate plugin entrypoints, but the rules - what
+    is gated, what a command costs, the defaults - must be one set. The V2 file
+    carries a verbatim copy of the V1 block, fenced by SHARED markers."""
+
+    START = "type DeepDive ="
+    END_V1 = "/** State shared across every instance"
+    END_V2 = "// ---- END SHARED ----"
+
+    def test_shared_block_is_identical(self):
+        v1 = PLUGIN_TS.read_text()
+        v2 = PLUGIN_V2_TS.read_text()
+        a = v1[v1.index(self.START):v1.index(self.END_V1)]
+        b = v2[v2.index(self.START):v2.index(self.END_V2)]
+        self.assertEqual(a, b, "the V1 and V2 plugins' shared rules have drifted")
+
+    def test_both_versions_enforce_the_same_gates(self):
+        v2 = PLUGIN_V2_TS.read_text()
+        for gate in ('"webfetch"', '"websearch"', '"question"', "usesCensysMcp(", "censysCost("):
+            with self.subTest(gate=gate):
+                self.assertIn(gate, PLUGIN_TS.read_text())
+                self.assertIn(gate, v2)
+
+    def test_v2_tools_are_named_for_opencode_2(self):
+        v2 = PLUGIN_V2_TS.read_text()
+        self.assertIn('name === "shell"', v2, "V2 renamed bash to shell")
+        self.assertIn('from "@opencode/plugin"', v2)
 
 
 class Shim(unittest.TestCase):

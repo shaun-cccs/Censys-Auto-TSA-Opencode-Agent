@@ -5,7 +5,7 @@ Runs the `censys-tsa-auto` opencode agent against a target and emits the
 resulting report spec as JSON on stdout.
 
 Everything is relative to the CURRENT DIRECTORY, not to the kit: the agent runs
-with `--dir $PWD`, and the durable output contract is
+in the current directory, and the durable output contract is
 ``./reports/<slug>.spec.json`` - the same schema `tsa report --template` defines.
 We deliberately do not parse ``opencode run --format json`` event output, which
 is a raw event stream and not a result object.
@@ -166,6 +166,39 @@ def apply_rate_profile(rate: str) -> str:
     if proc.returncode != 0:
         return f"could not set pacing: {(proc.stderr or '').strip()[:120]}"
     return f"pacing profile set to {rate}"
+
+
+def opencode_major() -> int:
+    """Major version of the opencode on PATH; 1 when it cannot be read.
+
+    ``opencode --version`` prints ``1.18.14`` on OpenCode 1 and
+    ``opencode v2.2.7`` on OpenCode 2.
+    """
+    try:
+        out = subprocess.run(
+            ["opencode", "--version"], capture_output=True, text=True, timeout=30
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return 1
+    match = re.search(r"(\d+)\.\d+\.\d+", out)
+    return int(match.group(1)) if match else 1
+
+
+def opencode_run_command(major: int, agent: str, slug: str) -> list[str]:
+    """The `opencode run` invocation for this OpenCode major version.
+
+    OpenCode 2 has no ``--dir`` (the working directory is used), and its
+    plugins run in a shared background service that never sees this process's
+    environment. ``--standalone`` starts a private server that inherits it, so
+    TSA_CAPABILITIES reaches the capability plugin.
+    """
+    cmd = ["opencode", "run", "--agent", agent]
+    if major >= 2:
+        cmd.append("--standalone")
+    else:
+        cmd += ["--dir", str(WORKDIR)]
+    cmd += ["--format", "json", "--title", f"TSA {slug}"]
+    return cmd
 
 
 def build_prompt(args: argparse.Namespace, slug: str, capabilities: str) -> str:
@@ -329,13 +362,7 @@ def main() -> int:
         return 0
 
     agent = AUTO_AGENT
-    cmd = [
-        "opencode", "run",
-        "--agent", agent,
-        "--dir", str(WORKDIR),
-        "--format", "json",
-        "--title", f"TSA {slug}",
-    ]
+    cmd = opencode_run_command(opencode_major(), agent, slug)
     cmd.append("--auto")
     if args.model:
         cmd += ["--model", args.model]

@@ -207,6 +207,19 @@ function censysCost(command: string): number {
   return 0 // cve, credits, budget, timeline, report, ref and doc are all free
 }
 
+/** The Censys Platform MCP server spends credits that `censysCost` cannot see,
+ *  so TSA runs are kept off it and use `tsa`, which the budget counts. Matches a
+ *  direct MCP tool call (`censys-platform_aggregate`, `censys_platform_...`) and,
+ *  on OpenCode 2, Code Mode code that calls `tools["censys-platform"]`. */
+const CENSYS_MCP = /censys[-_]platform/i
+
+function usesCensysMcp(tool: string, args: unknown): boolean {
+  if (CENSYS_MCP.test(tool)) return true
+  if (tool !== "execute") return false
+  const code = String((args as { code?: unknown } | null)?.code ?? "")
+  return CENSYS_MCP.test(code)
+}
+
 function summarise(c: Caps): string {
   const budget = c.callBudget === null ? "uncapped" : `${c.callsUsed}/${c.callBudget} used`
   return [
@@ -459,6 +472,13 @@ export const TsaCapabilities: Plugin = async ({ client }) => {
       if (!(await governed(input.sessionID))) return
       const { caps } = await capsFor(input.sessionID)
 
+      if (usesCensysMcp(input.tool, output?.args)) {
+        throw blocked(
+          "the Censys MCP server",
+          "its calls spend Censys credits outside this run's budget.",
+          "Use the `tsa` command in a shell instead (tsa search, tsa agg, tsa assess).",
+        )
+      }
       if (input.tool === "webfetch" && !caps.webfetch) {
         throw blocked(
           "webfetch",

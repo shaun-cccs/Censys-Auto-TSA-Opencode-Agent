@@ -30,51 +30,135 @@ Full report: reports/ivanti-epmm.md
 
 ## Install
 
-Requires [opencode](https://opencode.ai), [uv](https://docs.astral.sh/uv/), a
-POSIX shell (macOS, Linux, WSL), and a Censys Platform account.
+Requires [opencode](https://opencode.ai) **1.18.14 or newer, including
+OpenCode 2**, [uv](https://docs.astral.sh/uv/), a POSIX shell (macOS, Linux,
+WSL), and a Censys Platform account with the **API Access** role.
 
 ```bash
 git clone https://github.com/<you>/censys-tsa-opencode ~/.config/opencode/censys-tsa
+~/.config/opencode/censys-tsa/install.sh --dry-run    # see what it would do
 ~/.config/opencode/censys-tsa/install.sh
 ```
 
-Then export your credentials - both are required, and neither is ever written to
-a file by this kit:
+The installer detects your opencode version, links the matching plugin, checks
+the install, and - when run in a terminal and your Censys credentials are
+missing - offers to set them up:
+
+1. You paste the token (hidden as you type) and the organization ID.
+2. It checks them with Censys using the credit-balance call, which costs no
+   credits, and explains a rejection (400 / 401 / 403) in plain words.
+3. Only after you say yes, it backs up your shell profile (`~/.bashrc`,
+   `~/.zshrc` or `~/.profile`) and writes the two `export` lines in a marked
+   block that a re-run replaces. The file is set to mode 600.
+4. It adds the Censys Platform MCP server to your global `opencode.json`
+   (see below), and offers to restart the OpenCode background service so its
+   agents see the new variables. That restart interrupts running sessions, so
+   the default answer is no.
+5. Finally it offers to open a new shell in place of the script, with the
+   credentials already loaded. (A script cannot change the shell that started
+   it; the new shell reads your profile as it starts. `exit` returns to the
+   old one.) New terminals load them on their own from then on.
+
+Run that step on its own at any time with `install.sh --credentials`.
+
+Where to find the two values (from the
+[Censys docs](https://docs.censys.com/reference/get-started)):
+
+| Variable | Where |
+| --- | --- |
+| `CENSYS_PERSONAL_ACCESS_TOKEN` | platform.censys.io > user icon > **API Access**, or [accounts.censys.io/settings/personal-access-tokens](https://accounts.censys.io/settings/personal-access-tokens) > **Create New Token**. Shown only once. |
+| `CENSYS_ORG_ID` | Same page, **Current Organization** box > Copy. Select your organization, not your Free account. |
+
+Prefer to do it by hand? Put these in your shell profile, open a new terminal,
+and restart opencode:
 
 ```bash
-export CENSYS_PERSONAL_ACCESS_TOKEN=...   # Censys Platform → personal access token
-export CENSYS_ORG_ID=...                  # your organization; the `org=` in any platform URL
+export CENSYS_PERSONAL_ACCESS_TOKEN=...
+export CENSYS_ORG_ID=...
 ```
 
-Restart opencode (config, agents and plugins load once at startup), then check
-the install from anywhere:
+Check the install from anywhere:
 
 ```bash
 tsa doctor
 ```
 
+`tsa doctor` lists every failed check, then explains how to fix credential
+problems below the "N check(s) failed" line.
+
+### What it installs
+
 `install.sh` **symlinks** rather than copies, so `git pull` in the checkout
-updates the agents, prompts, references and plugin in one step. Nothing outside
-these five locations is touched, and your `opencode.json` is not edited:
+updates the agents, prompts, references and plugin in one step:
 
 ```
 ~/.config/opencode/agent/censys-{tsa,tsa-auto,fingerprint,deepdive,report}.md
-~/.config/opencode/plugin/tsa-capabilities.ts
+~/.config/opencode/plugin/tsa-capabilities.ts       OpenCode 1 plugin
+~/.config/opencode/plugins/tsa-capabilities/        OpenCode 2 plugin
 ~/.config/opencode/skill/censys-tsa/
 ~/.local/bin/tsa
-<the checkout>/.venv                       created by uv from the committed lockfile
+<the checkout>/.venv                                created by uv from the lockfile
 ```
 
-Clone it wherever you like - the `tsa` command resolves its own location through
-the symlink. `~/.config/opencode/censys-tsa` is only the recommended spot,
-because a plugin whose real path lives there resolves its runtime dependency
-without any help. Elsewhere, `install.sh` bridges that with a `node_modules`
-symlink and `tsa doctor` verifies it.
+Two writes outside those links, both only with your consent or once the
+credentials check out:
 
-Options: `--copy` (instead of symlinks), `--name <cmd>` (if `tsa` is taken),
-`--config-dir`, `--bin-dir`, `--dry-run`, `--uninstall`. `install.sh --uninstall`
-removes only the links it created and leaves the checkout, the venv and your
-reports alone.
+- your shell profile, for the two credentials (`--credentials` flow above);
+- your global `opencode.json`, for the `censys-platform` MCP server. A dated
+  backup is made first. The entry holds `{env:CENSYS_PERSONAL_ACCESS_TOKEN}`
+  and `{env:CENSYS_ORG_ID}` placeholders, never the values. A
+  `opencode.jsonc` with comments is never rewritten; the script prints the
+  snippet to add instead.
+
+### OpenCode 1 and OpenCode 2
+
+OpenCode 2 has a new plugin API and does not run OpenCode 1 plugins, so the
+kit ships the capability plugin twice with the same rules:
+
+| | Source | Installed as |
+| --- | --- | --- |
+| OpenCode 1 | `plugins/v1/tsa-capabilities.ts` | `plugin/tsa-capabilities.ts` |
+| OpenCode 2 | `plugins/v2/tsa-capabilities/index.ts` | `plugins/tsa-capabilities/` |
+
+Why they live outside `.opencode/`: opencode auto-loads plugins from a
+project's `.opencode/`, so opening this checkout would load the plugin a second
+time (OpenCode 2 refuses it as a duplicate) or try to run the V1 file on V2.
+A test fails if the two copies' shared rules drift apart.
+
+`install.sh` picks the version from `opencode --version`, or installs both when
+opencode is not on PATH. On OpenCode 2 it reloads opencode instead of asking
+you to restart it, and `tsa run` uses `opencode run --standalone`, because only a
+private server inherits `TSA_CAPABILITIES` from the environment.
+
+### The Censys MCP server
+
+Added once your credentials check out, so you can ask Censys questions in any
+ordinary opencode chat. **TSA runs are kept off it**: its calls spend credits
+the run's budget cannot count, so the capability plugin refuses them in every
+TSA session and the agents use `tsa` instead. Your other sessions are not
+affected.
+
+### Options
+
+| Option | Effect |
+| --- | --- |
+| `--dry-run` | print what would happen, change nothing |
+| `--doctor` | check an existing install (same as `tsa doctor`) |
+| `--credentials` | prompt for, verify and save the two Censys credentials |
+| `--mcp` / `--no-mcp` | always / never add the MCP server (default: once credentials check out) |
+| `--no-prompt` | never ask anything (scripts, CI) |
+| `--opencode 1\|2\|both` | override the detected opencode version |
+| `--copy` | copy instead of symlinking (re-run after `git pull`) |
+| `--name <cmd>` | install the command as something other than `tsa` |
+| `--config-dir`, `--bin-dir` | install somewhere else |
+| `--force` | replace files the script does not recognise as its own |
+| `--uninstall` | remove only what it created, including the MCP entry (`--no-mcp` keeps it); leaves the checkout, venv, reports and your shell profile alone |
+
+Clone it wherever you like - the `tsa` command resolves its own location through
+the symlink. On OpenCode 1, `~/.config/opencode/censys-tsa` is the recommended
+spot, because a plugin whose real path lives there resolves its runtime
+dependency without help. Elsewhere, `install.sh` bridges that with a
+`node_modules` symlink and `tsa doctor` verifies it. OpenCode 2 needs no bridge.
 
 No uv? Install `censys-platform` into any interpreter and set
 `CENSYS_TSA_PYTHON` to it; uv is then never invoked.

@@ -824,7 +824,7 @@ class RateProfileIsACapability(unittest.TestCase):
     def setUp(self):
         self.source = (
             Path(__file__).resolve().parent.parent
-            / ".opencode" / "plugin" / "tsa-capabilities.ts"
+            / "plugins" / "v1" / "tsa-capabilities.ts"
         ).read_text()
 
     def test_the_plugin_carries_the_choice(self):

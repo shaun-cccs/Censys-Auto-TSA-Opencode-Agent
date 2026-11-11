@@ -18,7 +18,8 @@ kit.
 | Path | What it is |
 | --- | --- |
 | `.opencode/agent/censys-*.md` | the five agents. Symlinked into `~/.config/opencode/agent/` by install.sh |
-| `.opencode/plugin/tsa-capabilities.ts` | capability negotiation and enforcement. Symlinked into `~/.config/opencode/plugin/` |
+| `plugins/v1/tsa-capabilities.ts` | capability negotiation and enforcement, OpenCode 1. Symlinked into `~/.config/opencode/plugin/` |
+| `plugins/v2/tsa-capabilities/index.ts` | the same rules for OpenCode 2. Symlinked into `~/.config/opencode/plugins/tsa-capabilities/` |
 | `.opencode/skill/censys-tsa/SKILL.md` | discovery skill: teaches a user's own agent to hand off to `@censys-tsa` |
 | `bin/tsa` | the single entrypoint. POSIX sh, self-locating, symlinked onto PATH |
 | `utils/*.py` | the actual tools. Flat scripts, never imported as a package |
@@ -155,7 +156,7 @@ explicitly. If you touch the plugin's imports, re-read that part of `install.sh`
 
 Network access, endpoint validation, the deep dive, report writing and the
 credit budget are **negotiated once at the start of a run and then enforced by a
-plugin** (`.opencode/plugin/tsa-capabilities.ts`) across every subagent.
+plugin** (`plugins/v1/tsa-capabilities.ts`, `plugins/v2/tsa-capabilities/index.ts` on OpenCode 2) across every subagent.
 
 - `censys-tsa` interviews the user (step -1) and records the answers with the
   `tsa_capabilities` tool.
